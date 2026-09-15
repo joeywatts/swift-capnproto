@@ -16,13 +16,23 @@ let package = Package(
         .executable(name: "capnpc-swift", targets: ["capnpc-swift"]),
         .executable(name: "capnp-swift", targets: ["capnp-swift"]),
         .executable(name: "capnp-test-swift", targets: ["capnp-test-swift"]),
+        .executable(name: "capnp-rpc-interop-swift", targets: ["capnp-rpc-interop-swift"]),
         .plugin(name: "CapnProtoPlugin", targets: ["CapnProtoPlugin"]),
+    ],
+    dependencies: [
+        .package(url: "https://github.com/apple/swift-nio.git", from: "2.102.0")
     ],
     targets: [
         .target(name: "CapnProto"),
         .target(name: "CapnProtoSchema", dependencies: ["CapnProto"]),
         .target(name: "CapnProtoRPC", dependencies: ["CapnProto", "CapnProtoSchema"]),
-        .target(name: "CapnProtoNIO", dependencies: ["CapnProtoRPC"]),
+        .target(
+            name: "CapnProtoNIO",
+            dependencies: [
+                "CapnProtoRPC",
+                .product(name: "NIOCore", package: "swift-nio"),
+                .product(name: "NIOPosix", package: "swift-nio"),
+            ]),
         .target(name: "CapnProtoCompiler", dependencies: ["CapnProto", "CapnProtoSchema"]),
         .target(
             name: "CapnProtoConformance",
@@ -43,6 +53,9 @@ let package = Package(
         .executableTarget(name: "capnp-swift", dependencies: ["CapnProtoCompiler"]),
         .executableTarget(
             name: "capnp-test-swift", dependencies: ["CapnProto", "CapnProtoConformance"]),
+        .executableTarget(
+            name: "capnp-rpc-interop-swift",
+            dependencies: ["CapnProto", "CapnProtoRPC", "CapnProtoNIO"]),
         .executableTarget(
             name: "capnp-fuzz-message",
             dependencies: ["CapnProtoTestSupport"],
@@ -75,7 +88,9 @@ let package = Package(
         ),
         .testTarget(
             name: "CapnProtoRPCTests", dependencies: ["CapnProto", "CapnProtoRPC"]),
-        .testTarget(name: "CapnProtoNIOTests", dependencies: ["CapnProtoNIO"]),
+        .testTarget(
+            name: "CapnProtoNIOTests",
+            dependencies: ["CapnProto", "CapnProtoRPC", "CapnProtoNIO"]),
         .testTarget(
             name: "CapnProtoCompilerTests",
             dependencies: [
