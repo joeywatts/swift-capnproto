@@ -40,8 +40,16 @@ public enum Canonicalization {
     /// Returns the unique, densely-packed, single-segment representation of a
     /// message's root pointer graph.
     public static func canonicalize(_ message: MessageReader) throws -> [UInt8] {
+        // Canonicalization has its own traversal budget. Prior reads through the
+        // caller's views must not make a deterministic serialization fail.
+        let sourceState = ReaderState(
+            segments: message.state.segments, options: message.state.options)
         var output = CanonicalBuffer()
-        var tasks = [CanonicalTask(source: try message.rootPointer(), destinationPointer: 0)]
+        var tasks = [
+            CanonicalTask(
+                source: try resolvePointer(state: sourceState, segment: 0, pointerIndex: 0),
+                destinationPointer: 0)
+        ]
         var visited = Set<CanonicalObjectKey>()
 
         while let task = tasks.popLast() {

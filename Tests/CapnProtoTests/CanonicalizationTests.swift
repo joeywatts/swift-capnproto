@@ -110,6 +110,21 @@ private func canonicalBytes(_ words: [UInt64]) -> [UInt8] {
     #expect(try read.structElement(at: 1).textField(at: 0).string == "nested")
 }
 
+@Test func canonicalizationUsesAnIndependentTraversalBudget() throws {
+    let message = try MessageBuilder(firstSegmentWords: 8)
+    let root = try message.initRootStruct(dataWords: 1, pointerCount: 0)
+    try root.setInteger(atByte: 0, to: UInt64(1))
+    let reader = try MessageReader(
+        segments: message.segments,
+        options: ReaderOptions(traversalLimitInWords: 1, nestingLimit: 64))
+    _ = try reader.rootStruct()
+    #expect(
+        try reader.canonicalized()
+            == canonicalBytes([
+                0x0000_0001_0000_0000, 1,
+            ]))
+}
+
 @Test func canonicalOutputMatchesPinnedCppForSharedFixturesWhenAvailable() throws {
     guard runCanonicalCapnp(arguments: ["--version"], input: []).status == 0 else { return }
     let directory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
