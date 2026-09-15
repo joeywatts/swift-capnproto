@@ -41,7 +41,15 @@ structs are emitted as nested types. Streaming methods return `Void` from the
 client and omit a results builder from the server signature; their descriptor's
 `isStreaming` flag remains available to dispatch code.
 
+Each interface provides `client(_:)` to bind a generated server to local
+dispatch. A derived client exposes typed views of its inherited interfaces.
+Non-streaming methods also provide a `...Request` form returning a generated
+pipeline view: callers can await its typed `response()`, cancel it, or immediately
+use generated capability-field accessors while the parent result is unresolved.
+
 `CapabilityClient` delegates calls to an application- or RPC-runtime-provided
-`CapabilityCallTarget`. Capability fields and lists accept clients backed by a
-capability-table index. Network dispatch and capability-table ownership are RPC
-runtime responsibilities implemented in later roadmap milestones.
+`CapabilityCallTarget`. It supports null and broken clients, structured remote
+exceptions, checked interface casts, promise resolution, and ordered queued calls.
+Capability fields and lists accept clients backed by a capability-table index.
+The runtime's reference-counted table releases entries exactly once. RPC wire
+dispatch and network capability-table synchronization remain Milestone 6 work.

@@ -175,8 +175,13 @@ public struct SwiftGenerator {
                     "\(indent)        public func \(methodName)(_ params: \(params).Reader) async throws { _ = try await raw.call(Methods.\(methodName), params: params.raw) }"
                 )
             } else {
+                let pipeline = swiftIdentifier(upperFirst(try method.name) + "Pipeline")
+                let requestName = swiftIdentifier(try method.name + "Request")
                 lines.append(
-                    "\(indent)        public func \(methodName)(_ params: \(params).Reader) async throws -> \(results).Reader { \(results).Reader(try await raw.call(Methods.\(methodName), params: params.raw)) }"
+                    "\(indent)        public func \(requestName)(_ params: \(params).Reader) -> \(pipeline) { \(pipeline)(raw.startCall(Methods.\(methodName), params: params.raw)) }"
+                )
+                lines.append(
+                    "\(indent)        public func \(methodName)(_ params: \(params).Reader) async throws -> \(results).Reader { try await \(requestName)(params).response() }"
                 )
             }
         }
@@ -192,6 +197,34 @@ public struct SwiftGenerator {
         }
         lines.append("\(indent)    }")
         lines.append("")
+        for method in methods where try !method.isStreaming {
+            let pipeline = swiftIdentifier(upperFirst(try method.name) + "Pipeline")
+            let results = try methodTypeName(method.resultStructType, names: names)
+            guard let resultNode = nodes[try method.resultStructType] else {
+                throw SwiftGeneratorError.missingNode(try method.resultStructType)
+            }
+            lines.append("\(indent)    public struct \(pipeline): Sendable {")
+            lines.append("\(indent)        private let call: CapabilityCall")
+            lines.append(
+                "\(indent)        public init(_ call: CapabilityCall) { self.call = call }")
+            lines.append(
+                "\(indent)        public func response() async throws -> \(results).Reader { \(results).Reader(try await call.response()) }"
+            )
+            lines.append("\(indent)        public func cancel() { call.cancel() }")
+            for field in try resultNode.fields where try field.kind == .slot {
+                let type = try field.type
+                guard try type.kind == .interface else { continue }
+                let fieldName = swiftIdentifier(try field.name)
+                let swift = try swiftType(type, names: names)
+                lines.append("\(indent)        public var \(fieldName): \(swift) {")
+                lines.append(
+                    "\(indent)            \(swift)(call.pipelineCapability { raw in try \(results).Reader(raw).\(fieldName).raw })"
+                )
+                lines.append("\(indent)        }")
+            }
+            lines.append("\(indent)    }")
+            lines.append("")
+        }
         let inherited = try superclasses.map {
             guard let inheritedName = names[try $0.id] else {
                 throw SwiftGeneratorError.missingNode(try $0.id)

@@ -17,9 +17,21 @@ public enum Base {
         public let raw: CapabilityClient
         public init(_ raw: CapabilityClient) { self.raw = raw }
         public init(_ pointer: AnyPointerReader) { raw = CapabilityClient(pointer: pointer) }
-        public func ping(_ params: Base.PingParams.Reader) async throws -> Base.PingResults.Reader {
-            Base.PingResults.Reader(try await raw.call(Methods.ping, params: params.raw))
+        public func pingRequest(_ params: Base.PingParams.Reader) -> PingPipeline {
+            PingPipeline(raw.startCall(Methods.ping, params: params.raw))
         }
+        public func ping(_ params: Base.PingParams.Reader) async throws -> Base.PingResults.Reader {
+            try await pingRequest(params).response()
+        }
+    }
+
+    public struct PingPipeline: Sendable {
+        private let call: CapabilityCall
+        public init(_ call: CapabilityCall) { self.call = call }
+        public func response() async throws -> Base.PingResults.Reader {
+            Base.PingResults.Reader(try await call.response())
+        }
+        public func cancel() { call.cancel() }
     }
 
     public protocol Server {
@@ -153,12 +165,24 @@ public enum Child {
         public let raw: CapabilityClient
         public init(_ raw: CapabilityClient) { self.raw = raw }
         public init(_ pointer: AnyPointerReader) { raw = CapabilityClient(pointer: pointer) }
+        public func callRequest(_ params: Child.CallParams.Reader) -> CallPipeline {
+            CallPipeline(raw.startCall(Methods.call, params: params.raw))
+        }
         public func call(_ params: Child.CallParams.Reader) async throws -> Child.CallResults.Reader
-        { Child.CallResults.Reader(try await raw.call(Methods.call, params: params.raw)) }
+        { try await callRequest(params).response() }
         public func streamIt(_ params: Child.StreamItParams.Reader) async throws {
             _ = try await raw.call(Methods.streamIt, params: params.raw)
         }
         public var asBase: Base.Client { Base.Client(raw) }
+    }
+
+    public struct CallPipeline: Sendable {
+        private let call: CapabilityCall
+        public init(_ call: CapabilityCall) { self.call = call }
+        public func response() async throws -> Child.CallResults.Reader {
+            Child.CallResults.Reader(try await call.response())
+        }
+        public func cancel() { call.cancel() }
     }
 
     public protocol Server: Base.Server {

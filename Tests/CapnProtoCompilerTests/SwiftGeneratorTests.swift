@@ -154,8 +154,9 @@ func identifierEscaping(_ name: String) {
     let inheritedMessage = try MessageBuilder()
     let inheritedParams = try Base.PingParams.initRoot(in: inheritedMessage)
     try inheritedParams.setValue(321)
-    let inheritedResult = try await local.asBase.ping(
+    let inheritedPipeline = local.asBase.pingRequest(
         Base.PingParams.Reader(try inheritedMessage.asReader().rootStruct()))
+    let inheritedResult = try await inheritedPipeline.response()
     #expect(try inheritedResult.text == "321")
 
     let streamMessage = try MessageBuilder()
