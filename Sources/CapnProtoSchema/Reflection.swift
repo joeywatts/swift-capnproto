@@ -291,6 +291,52 @@ public struct SchemaNode {
         result.remove(id)
         return result
     }
+
+    /// Dependencies required for dynamic use. Lexical parents and `nestedNodes`
+    /// are optional because compiler requests may omit nested constants and the
+    /// loader supports loading children before their parents.
+    public var requiredDependencyIDs: Set<Schema.ID> {
+        var result = importIDs
+        func add(_ type: SchemaType) {
+            switch type {
+            case .list(let element): add(element)
+            case .enumeration(let id, let brand), .structure(let id, let brand),
+                .interface(let id, let brand):
+                result.insert(id)
+                for scope in brand.scopes {
+                    if case .bindings(let bindings) = scope.binding {
+                        for binding in bindings {
+                            if case .type(let type) = binding { add(type) }
+                        }
+                    }
+                }
+            case .anyPointer(.parameter(let id, _)): result.insert(id)
+            default: break
+            }
+        }
+        switch kind {
+        case .structure(_, _, _, _, _, _, let fields):
+            for field in fields {
+                switch field.storage {
+                case .slot(_, let type, _): add(type)
+                case .group(let id): result.insert(id)
+                }
+                for annotation in field.annotations { result.insert(annotation.id) }
+            }
+        case .interface(let methods, let supers):
+            result.formUnion(supers.map(\.id))
+            for method in methods {
+                result.insert(method.paramStructType)
+                result.insert(method.resultStructType)
+                for annotation in method.annotations { result.insert(annotation.id) }
+            }
+        case .constant(let type, _), .annotation(let type, _): add(type)
+        default: break
+        }
+        for annotation in annotations { result.insert(annotation.id) }
+        result.remove(id)
+        return result
+    }
 }
 
 public struct SchemaRegistry {
@@ -334,11 +380,12 @@ public struct SchemaRegistry {
 
     public func validateGraph() throws {
         for node in nodesByID.values {
-            for dependency in node.dependencyIDs where nodesByID[dependency] == nil {
-                throw SchemaError.missingSchema(dependency)
+            for dependency in node.requiredDependencyIDs where nodesByID[dependency] == nil {
+                throw SchemaError.invalidNode(
+                    node.id, "required dependency \(hexID(dependency)) is not loaded")
             }
             for (name, childID) in node.nestedNodes {
-                let child = try requireSchema(id: childID)
+                guard let child = schema(id: childID) else { continue }
                 guard child.scopeID == node.id else {
                     throw SchemaError.invalidNode(node.id, "nested node '\(name)' has wrong scope")
                 }

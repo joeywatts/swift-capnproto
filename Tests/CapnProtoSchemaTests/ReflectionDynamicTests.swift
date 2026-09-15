@@ -43,8 +43,21 @@ private let emptyBrand = SchemaBrand()
     var missing = SchemaLoader()
     try missing.load(
         SchemaNode(
-            id: 20, displayName: "MissingOwner", nestedNodes: ["Child": 21], kind: .file))
-    #expect(throws: SchemaError.missingSchema(21)) { try missing.finish() }
+            id: 20, displayName: "MissingOwner",
+            kind: .structure(
+                dataWordCount: 0, pointerCount: 1, preferredListEncoding: .inlineComposite,
+                isGroup: false, discriminantCount: 0, discriminantOffset: 0,
+                fields: [
+                    SchemaField(
+                        name: "child", codeOrder: 0,
+                        storage: .slot(
+                            offset: 0, type: .structure(id: 21, brand: emptyBrand),
+                            defaultValue: .void))
+                ])))
+    #expect(
+        throws: SchemaError.invalidNode(
+            20, "required dependency 0x15 is not loaded")
+    ) { try missing.finish() }
 
     var invalid = SchemaLoader()
     let invalidField = SchemaField(

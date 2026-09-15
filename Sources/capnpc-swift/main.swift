@@ -9,11 +9,14 @@ do {
     if CommandLine.arguments.dropFirst() == ["--bootstrap-roundtrip"] {
         FileHandle.standardOutput.write(Data(try request.reencodedBytes()))
     } else if CommandLine.arguments.dropFirst() == ["--bootstrap-inspect"] {
+        var loader = SchemaLoader()
+        let schemas = try loader.load(request: request)
+        try loader.finish()
         let version = try request.capnpVersion
         let files = try request.requestedFiles
         let summary =
             "capnp \(try version.major).\(try version.minor).\(try version.micro): "
-            + "\(try request.nodes.count) nodes, "
+            + "\(schemas.count) validated nodes, "
             + files.map { (try? $0.filename) ?? "<invalid>" }.joined(separator: ", ") + "\n"
         FileHandle.standardOutput.write(Data(summary.utf8))
     } else if CommandLine.arguments.count == 1 {
