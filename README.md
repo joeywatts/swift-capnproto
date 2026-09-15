@@ -4,7 +4,7 @@
 [Cap'n Proto](https://capnproto.org/), including serialization, schema-driven
 code generation, reflection, and capability-based RPC.
 
-The project is currently in its bootstrap phase. The implementation sequence,
+The project is currently in its foundation phase. The implementation sequence,
 commit boundaries, and upstream-informed verification criteria are described in
 [ROADMAP.md](ROADMAP.md).
 
@@ -42,11 +42,11 @@ Proto's reference tools, CMake, Ninja, Git, and pkg-config. It supplies Swift on
 Linux; macOS uses the Swift toolchain installed with Xcode or the Xcode
 command-line tools.
 
-Once the Swift package is introduced, the normal validation entry point will
-be:
+The normal validation entry points are:
 
 ```sh
 swift test
+Scripts/check-package-boundaries.sh
 ```
 
 ## Compatibility testing
@@ -59,5 +59,5 @@ to the pinned tests and schemas from the reference
 
 ## License
 
-Licensing will be finalized before implementation code is added. Imported test
-fixtures will retain their original notices and provenance.
+The project is available under the MIT License. Imported test fixtures retain
+their original notices and provenance.

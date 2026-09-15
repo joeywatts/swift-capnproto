@@ -20,7 +20,7 @@
           pkgs = import nixpkgs { inherit system; };
         in
         {
-          default = pkgs.mkShell {
+          default = (if pkgs.stdenv.hostPlatform.isDarwin then pkgs.mkShellNoCC else pkgs.mkShell) {
             packages = with pkgs;
               [
                 capnproto
@@ -28,6 +28,7 @@
                 git
                 ninja
                 pkg-config
+                ripgrep
               ]
               ++ lib.optionals stdenv.hostPlatform.isLinux [ swift ];
 
@@ -37,6 +38,9 @@
             };
 
             shellHook = ''
+              ${pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
+                export PATH="/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+              ''}
               if ! command -v swift >/dev/null 2>&1; then
                 echo "Swift was not found. On macOS, install the Xcode command-line tools." >&2
               fi
