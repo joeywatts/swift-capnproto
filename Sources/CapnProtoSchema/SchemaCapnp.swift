@@ -87,6 +87,16 @@ public enum Schema {
         case inlineComposite = 7
     }
 
+    public enum AnyPointerKind: Equatable, Sendable {
+        case anyKind
+        case `struct`
+        case list
+        case capability
+        case parameter(scopeID: ID, index: UInt16)
+        case implicitMethodParameter(index: UInt16)
+        case unknown(UInt16)
+    }
+
     public struct CodeGeneratorRequest {
         private let root: StructReader
         private let sourceWordCount: Int
@@ -266,6 +276,27 @@ public enum Schema {
         public var kind: TypeKind { get throws { TypeKind(try value.integer(atByte: 0)) } }
         public var elementType: Type { get throws { Type(try value.structField(at: 0)) } }
         public var typeID: ID { get throws { try value.integer(atByte: 8) } }
+        public var anyPointerKind: AnyPointerKind {
+            get throws {
+                switch try value.integer(atByte: 8, as: UInt16.self) {
+                case 0:
+                    switch try value.integer(atByte: 10, as: UInt16.self) {
+                    case 0: return .anyKind
+                    case 1: return .struct
+                    case 2: return .list
+                    case 3: return .capability
+                    case let tag: return .unknown(tag)
+                    }
+                case 1:
+                    return .parameter(
+                        scopeID: try value.integer(atByte: 16),
+                        index: try value.integer(atByte: 10))
+                case 2:
+                    return .implicitMethodParameter(index: try value.integer(atByte: 10))
+                case let tag: return .unknown(tag)
+                }
+            }
+        }
     }
 
     public struct Value {

@@ -311,7 +311,7 @@ public struct ListReader {
 }
 
 public struct AnyPointerReader {
-    private let pointer: ResolvedPointer
+    let pointer: ResolvedPointer
     private let depth: Int
 
     init(pointer: ResolvedPointer, depth: Int) {
@@ -322,6 +322,58 @@ public struct AnyPointerReader {
     public var isNull: Bool { pointer.isNull }
     public func asStruct() throws -> StructReader { try pointer.asStruct(depth: depth) }
     public func asList() throws -> ListReader { try pointer.asList(depth: depth) }
+    public func asText() throws -> TextReader { TextReader(data: DataReader(list: try asList())) }
+    public func asData() throws -> DataReader { DataReader(list: try asList()) }
+}
+
+public protocol CapnProtoPointerType {
+    associatedtype Value
+    static func read(from pointer: AnyPointerReader) throws -> Value
+    static func write(_ value: Value, to pointer: AnyPointerBuilder) throws
+}
+
+public enum CapnProtoAnyPointer: CapnProtoPointerType {
+    public static func read(from pointer: AnyPointerReader) -> AnyPointerReader { pointer }
+    public static func write(_ value: AnyPointerReader, to pointer: AnyPointerBuilder) throws {
+        try pointer.set(value)
+    }
+}
+
+public enum CapnProtoAnyStruct: CapnProtoPointerType {
+    public static func read(from pointer: AnyPointerReader) throws -> StructReader {
+        try pointer.asStruct()
+    }
+    public static func write(_ value: StructReader, to pointer: AnyPointerBuilder) throws {
+        try pointer.setStruct(value)
+    }
+}
+
+public enum CapnProtoAnyList: CapnProtoPointerType {
+    public static func read(from pointer: AnyPointerReader) throws -> ListReader {
+        try pointer.asList()
+    }
+    public static func write(_ value: ListReader, to pointer: AnyPointerBuilder) throws {
+        try pointer.setList(value)
+    }
+}
+
+public enum CapnProtoText: CapnProtoPointerType {
+    public static func read(from pointer: AnyPointerReader) throws -> String {
+        guard let value = try pointer.asText().string else { throw CapnProtoError.invalidText }
+        return value
+    }
+    public static func write(_ value: String, to pointer: AnyPointerBuilder) throws {
+        try pointer.setText(value)
+    }
+}
+
+public enum CapnProtoData: CapnProtoPointerType {
+    public static func read(from pointer: AnyPointerReader) throws -> [UInt8] {
+        try pointer.asData().bytes
+    }
+    public static func write(_ value: [UInt8], to pointer: AnyPointerBuilder) throws {
+        try pointer.setData(value)
+    }
 }
 
 public struct DataReader {

@@ -208,6 +208,11 @@ public struct StructBuilder {
             pointerIndex: pointer)
     }
 
+    public func anyPointerField(at index: Int) throws -> AnyPointerBuilder {
+        AnyPointerBuilder(
+            arena: arena, segment: segment, pointerIndex: try pointerIndex(index))
+    }
+
     public func disownPointer(at index: Int) throws -> Orphan {
         let pointer = try pointerIndex(index)
         let state = ReaderState(segments: arena.outputSegments, options: ReaderOptions())
@@ -240,6 +245,16 @@ public struct StructBuilder {
         }
     }
 
+    public func clearData(atBit offset: Int) throws {
+        guard offset >= 0, offset < dataWordCount * 64 else {
+            throw CapnProtoError.indexOutOfBounds(index: offset, count: dataWordCount * 64)
+        }
+        let byteOffset = dataStart * 8 + offset / 8
+        try arena.withBytes(segment: segment) { bytes in
+            bytes[byteOffset] &= ~UInt8(1 << UInt8(offset % 8))
+        }
+    }
+
     /// Clears the storage occupied by a group. Pointer indices need not be
     /// contiguous, which supports interleaved group layouts.
     public func clearGroup(dataByteRanges: [Range<Int>], pointerIndices: [Int]) throws {
@@ -256,9 +271,11 @@ public struct StructBuilder {
     public func selectUnion(
         discriminant value: UInt16, atByte offset: Int,
         clearingData dataByteRanges: [Range<Int>] = [],
+        clearingBits dataBitOffsets: [Int] = [],
         clearingPointers pointerIndices: [Int] = []
     ) throws {
         try clearGroup(dataByteRanges: dataByteRanges, pointerIndices: pointerIndices)
+        for bit in dataBitOffsets { try clearData(atBit: bit) }
         try setDiscriminant(atByte: offset, to: value)
     }
 
@@ -417,6 +434,21 @@ public struct ListBuilder {
             pointerCount: pointerCount)
     }
 
+    public func initStructList(
+        at index: Int, count: Int, dataWords: Int, pointerCount: Int
+    ) throws -> StructListBuilder {
+        let pointer = try elementPointerIndex(index)
+        try arena.setWord(0, segment: segment, index: pointer)
+        return try StructListBuilder.initialize(
+            arena: arena, pointerSegment: segment, pointerIndex: pointer, count: count,
+            dataWords: dataWords, pointerCount: pointerCount)
+    }
+
+    public func anyPointer(at index: Int) throws -> AnyPointerBuilder {
+        AnyPointerBuilder(
+            arena: arena, segment: segment, pointerIndex: try elementPointerIndex(index))
+    }
+
     public func setData(at index: Int, to bytes: [UInt8]) throws {
         let child = try initList(at: index, elementSize: .byte, count: bytes.count)
         try DataBuilder(list: child).setBytes(bytes)
@@ -493,6 +525,74 @@ public struct ListBuilder {
         guard index >= 0, index < count else {
             throw CapnProtoError.indexOutOfBounds(index: index, count: count)
         }
+    }
+}
+
+public struct AnyPointerBuilder {
+    private let arena: BuilderArena
+    private let segment: Int
+    private let pointerIndex: Int
+
+    init(arena: BuilderArena, segment: Int, pointerIndex: Int) {
+        self.arena = arena
+        self.segment = segment
+        self.pointerIndex = pointerIndex
+    }
+
+    public func clear() throws {
+        try arena.clearPointerGraph(segment: segment, pointerIndex: pointerIndex)
+    }
+
+    public func set(_ source: AnyPointerReader) throws {
+        try clear()
+        try copyPointerGraph(
+            source: .resolved(source.pointer), to: arena, pointerSegment: segment,
+            pointerIndex: pointerIndex)
+    }
+
+    public func setStruct(_ source: StructReader) throws {
+        try clear()
+        try copyPointerGraph(
+            source: .structReader(source), to: arena, pointerSegment: segment,
+            pointerIndex: pointerIndex)
+    }
+
+    public func setList(_ source: ListReader) throws {
+        try clear()
+        try copyPointerGraph(
+            source: .listReader(source), to: arena, pointerSegment: segment,
+            pointerIndex: pointerIndex)
+    }
+
+    public func setData(_ bytes: [UInt8]) throws {
+        let list = try initList(elementSize: .byte, count: bytes.count)
+        try DataBuilder(list: list).setBytes(bytes)
+    }
+
+    public func setText(_ text: String) throws {
+        let bytes = Array(text.utf8)
+        let list = try initList(elementSize: .byte, count: try checkedAdd(bytes.count, 1))
+        try TextBuilder(data: DataBuilder(list: list)).setUTF8(bytes)
+    }
+
+    public func initStruct(dataWords: Int, pointerCount: Int) throws -> StructBuilder {
+        try validateStructSize(dataWords: dataWords, pointerCount: pointerCount)
+        try clear()
+        let object = try arena.allocateObject(
+            words: try checkedAdd(dataWords, pointerCount), fromPointerIn: segment,
+            at: pointerIndex,
+            pointerValue: .struct(dataWords: dataWords, pointerWords: pointerCount))
+        return StructBuilder(
+            arena: arena, segment: object.allocation.segmentID, dataStart: object.objectStart,
+            dataWords: dataWords, pointerStart: object.objectStart + dataWords,
+            pointerCount: pointerCount)
+    }
+
+    public func initList(elementSize: ListElementSize, count: Int) throws -> ListBuilder {
+        try clear()
+        return try ListBuilder.initialize(
+            arena: arena, pointerSegment: segment, pointerIndex: pointerIndex,
+            elementSize: elementSize, count: count)
     }
 }
 

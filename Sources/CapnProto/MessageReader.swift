@@ -90,6 +90,10 @@ public struct MessageReader {
         return try pointer.asList(depth: 0)
     }
 
+    public func rootAnyPointer() throws -> AnyPointerReader {
+        AnyPointerReader(pointer: try rootPointer(), depth: 0)
+    }
+
     public func rootData() throws -> DataReader {
         let list = try rootList()
         guard list.elementSize == .byte || list.isNull else {

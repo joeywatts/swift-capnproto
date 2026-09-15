@@ -163,50 +163,210 @@ public struct SwiftGenerator {
 
     private func emitStruct(
         _ node: Schema.Node, name: String, nodes: [Schema.ID: Schema.Node],
-        names: [Schema.ID: String], indent: String, into lines: inout [String]
+        names: [Schema.ID: String], indent: String, isGroup: Bool = false,
+        into lines: inout [String]
     ) throws {
         lines.append("\(indent)public enum \(name) {")
         lines.append("\(indent)    public static let schemaID: UInt64 = \(try node.id)")
+        if !isGroup {
+            lines.append("\(indent)    public enum Pointer: CapnProtoPointerType {")
+            lines.append(
+                "\(indent)        public static func read(from pointer: AnyPointerReader) throws -> Reader { Reader(try pointer.asStruct()) }"
+            )
+            lines.append(
+                "\(indent)        public static func write(_ value: Reader, to pointer: AnyPointerBuilder) throws { try pointer.setStruct(value.raw) }"
+            )
+            lines.append("\(indent)    }")
+        }
+        let parameters = try node.parameters.map { try $0.name }
+        if !parameters.isEmpty {
+            lines.append(
+                "\(indent)    public static let genericParameters: [String] = \(String(reflecting: parameters))"
+            )
+            let genericTypes = parameters.map { "\(swiftIdentifier($0)): CapnProtoPointerType" }
+            lines.append(
+                "\(indent)    public struct Generic<\(genericTypes.joined(separator: ", "))> {")
+            lines.append("\(indent)        public struct Reader {")
+            lines.append("\(indent)            public let raw: \(name).Reader")
+            lines.append(
+                "\(indent)            public init(_ raw: \(name).Reader) { self.raw = raw }")
+            for field in try node.fields {
+                guard let index = try parameterIndex(field, scopeID: node.id),
+                    parameters.indices.contains(index)
+                else { continue }
+                let parameter = swiftIdentifier(parameters[index])
+                let fieldName = swiftIdentifier(try field.name)
+                lines.append("\(indent)            public var \(fieldName): \(parameter).Value {")
+                lines.append(
+                    "\(indent)                get throws { try \(parameter).read(from: raw.\(fieldName)) }"
+                )
+                lines.append("\(indent)            }")
+            }
+            lines.append("\(indent)        }")
+            lines.append("\(indent)        public struct Builder {")
+            lines.append("\(indent)            public let raw: \(name).Builder")
+            lines.append(
+                "\(indent)            public init(_ raw: \(name).Builder) { self.raw = raw }")
+            for field in try node.fields {
+                guard let index = try parameterIndex(field, scopeID: node.id),
+                    parameters.indices.contains(index)
+                else { continue }
+                let parameter = swiftIdentifier(parameters[index])
+                let fieldName = try field.name
+                lines.append(
+                    "\(indent)            public func set\(upperFirst(fieldName))(_ value: \(parameter).Value) throws {"
+                )
+                lines.append(
+                    "\(indent)                let pointer = try raw.\(swiftIdentifier(fieldName))")
+                lines.append("\(indent)                try \(parameter).write(value, to: pointer)")
+                lines.append("\(indent)            }")
+            }
+            lines.append("\(indent)        }")
+            lines.append(
+                "\(indent)        public static func readRoot(from bytes: [UInt8], options: ReaderOptions = ReaderOptions()) throws -> Reader {"
+            )
+            lines.append(
+                "\(indent)            Reader(try \(name).readRoot(from: bytes, options: options))")
+            lines.append("\(indent)        }")
+            lines.append(
+                "\(indent)        public static func initRoot(in message: MessageBuilder) throws -> Builder {"
+            )
+            lines.append("\(indent)            Builder(try \(name).initRoot(in: message))")
+            lines.append("\(indent)        }")
+            lines.append("\(indent)    }")
+        }
+        let unionFields = try node.fields.filter {
+            try $0.discriminantValue != Schema.Field.noDiscriminant
+        }
+        if !unionFields.isEmpty {
+            try emitUnionView(
+                node, fields: unionFields, names: names, indent: indent + "    ", into: &lines)
+        }
         lines.append("")
         lines.append("\(indent)    public struct Reader {")
         lines.append("\(indent)        public let raw: StructReader")
         lines.append("\(indent)        public init(_ raw: StructReader) { self.raw = raw }")
-        for field in try node.fields where try field.kind == .slot {
-            try emitReaderField(field, names: names, indent: indent + "        ", into: &lines)
+        for field in try node.fields {
+            switch try field.kind {
+            case .slot:
+                try emitReaderField(field, names: names, indent: indent + "        ", into: &lines)
+            case .group:
+                let groupName = try groupName(field)
+                lines.append(
+                    "\(indent)        public var \(swiftIdentifier(try field.name)): \(groupName).Reader { \(groupName).Reader(raw) }"
+                )
+            case .unknown(let value):
+                throw SwiftGeneratorError.unsupportedSchema("field discriminant \(value)")
+            }
+        }
+        if !unionFields.isEmpty {
+            lines.append("\(indent)        public var which: Which {")
+            lines.append("\(indent)            get throws {")
+            lines.append(
+                "\(indent)                let tag = try raw.discriminant(atByte: \(try node.discriminantOffset * 2))"
+            )
+            lines.append("\(indent)                switch tag {")
+            for field in unionFields {
+                let caseName = swiftIdentifier(try field.name)
+                let value = try field.discriminantValue
+                if try field.kind == .slot, try field.type.kind == .void {
+                    lines.append("\(indent)                case \(value): return .\(caseName)")
+                } else if try field.kind == .group {
+                    lines.append(
+                        "\(indent)                case \(value): return .\(caseName)(\(caseName))"
+                    )
+                } else {
+                    lines.append(
+                        "\(indent)                case \(value): return .\(caseName)(try \(caseName))"
+                    )
+                }
+            }
+            lines.append("\(indent)                default: return .unknown(tag)")
+            lines.append("\(indent)                }")
+            lines.append("\(indent)            }")
+            lines.append("\(indent)        }")
         }
         lines.append("\(indent)    }")
         lines.append("")
         lines.append("\(indent)    public struct Builder {")
         lines.append("\(indent)        public let raw: StructBuilder")
         lines.append("\(indent)        public init(_ raw: StructBuilder) { self.raw = raw }")
-        for field in try node.fields where try field.kind == .slot {
-            try emitBuilderField(
-                field, nodes: nodes, names: names, indent: indent + "        ", into: &lines)
+        let storage = try unionStorage(node, nodes: nodes)
+        for field in try node.fields {
+            let selection =
+                try field.discriminantValue == Schema.Field.noDiscriminant
+                ? nil
+                : unionSelection(
+                    field: field, node: node, storage: storage, indent: indent + "            ")
+            switch try field.kind {
+            case .slot:
+                try emitBuilderField(
+                    field, nodes: nodes, names: names, selection: selection,
+                    indent: indent + "        ", into: &lines)
+            case .group:
+                let fieldName = try field.name
+                let groupName = try groupName(field)
+                if let selection {
+                    lines.append(
+                        "\(indent)        public func select\(upperFirst(fieldName))() throws -> \(groupName).Builder {"
+                    )
+                    lines.append(selection)
+                    lines.append("\(indent)            return \(groupName).Builder(raw)")
+                    lines.append("\(indent)        }")
+                } else {
+                    lines.append(
+                        "\(indent)        public var \(swiftIdentifier(fieldName)): \(groupName).Builder { \(groupName).Builder(raw) }"
+                    )
+                }
+            case .unknown(let value):
+                throw SwiftGeneratorError.unsupportedSchema("field discriminant \(value)")
+            }
+        }
+        if !unionFields.isEmpty {
+            lines.append(
+                "\(indent)        public func setUnknownDiscriminant(_ tag: UInt16) throws {"
+            )
+            lines.append(
+                "\(indent)            try raw.setDiscriminant(atByte: \(try node.discriminantOffset * 2), to: tag)"
+            )
+            lines.append("\(indent)        }")
         }
         lines.append("\(indent)    }")
         lines.append("")
-        lines.append(
-            "\(indent)    public static func readRoot(from bytes: [UInt8], options: ReaderOptions = ReaderOptions()) throws -> Reader {"
-        )
-        lines.append("\(indent)        let frame = try MessageFraming.decodePrefix(bytes)")
-        lines.append(
-            "\(indent)        guard frame.byteCount == bytes.count else { throw CapnProtoError.invalidFrame }"
-        )
-        lines.append(
-            "\(indent)        return Reader(try frame.reader(options: options).rootStruct())")
-        lines.append("\(indent)    }")
-        lines.append("")
-        lines.append(
-            "\(indent)    public static func initRoot(in message: MessageBuilder) throws -> Builder {"
-        )
-        lines.append(
-            "\(indent)        Builder(try message.initRootStruct(dataWords: \(try node.dataWordCount), pointerCount: \(try node.pointerCount)))"
-        )
-        lines.append("\(indent)    }")
+        if !isGroup {
+            lines.append("")
+            lines.append(
+                "\(indent)    public static func readRoot(from bytes: [UInt8], options: ReaderOptions = ReaderOptions()) throws -> Reader {"
+            )
+            lines.append("\(indent)        let frame = try MessageFraming.decodePrefix(bytes)")
+            lines.append(
+                "\(indent)        guard frame.byteCount == bytes.count else { throw CapnProtoError.invalidFrame }"
+            )
+            lines.append(
+                "\(indent)        return Reader(try frame.reader(options: options).rootStruct())")
+            lines.append("\(indent)    }")
+            lines.append("")
+            lines.append(
+                "\(indent)    public static func initRoot(in message: MessageBuilder) throws -> Builder {"
+            )
+            lines.append(
+                "\(indent)        Builder(try message.initRootStruct(dataWords: \(try node.dataWordCount), pointerCount: \(try node.pointerCount)))"
+            )
+            lines.append("\(indent)    }")
+        }
         for child in try node.nestedNodes {
             lines.append("")
             try emitDeclaration(
                 child, nodes: nodes, names: names, indent: indent + "    ", into: &lines)
+        }
+        for field in try node.fields where try field.kind == .group {
+            guard let group = nodes[try field.groupTypeID] else {
+                throw SwiftGeneratorError.missingNode(try field.groupTypeID)
+            }
+            lines.append("")
+            try emitStruct(
+                group, name: try groupName(field), nodes: nodes, names: names,
+                indent: indent + "    ", isGroup: true, into: &lines)
         }
         lines.append("\(indent)}")
         lines.append("")
@@ -234,9 +394,35 @@ public struct SwiftGenerator {
         }
     }
 
+    private func emitUnionView(
+        _ node: Schema.Node, fields: [Schema.Field], names: [Schema.ID: String], indent: String,
+        into lines: inout [String]
+    ) throws {
+        lines.append("\(indent)public enum Which {")
+        for field in fields {
+            let name = swiftIdentifier(try field.name)
+            switch try field.kind {
+            case .group:
+                lines.append("\(indent)    case \(name)(\(try groupName(field)).Reader)")
+            case .slot:
+                if try field.type.kind == .void {
+                    lines.append("\(indent)    case \(name)")
+                } else {
+                    lines.append(
+                        "\(indent)    case \(name)(\(try swiftType(field.type, names: names)))"
+                    )
+                }
+            case .unknown(let value):
+                throw SwiftGeneratorError.unsupportedSchema("field discriminant \(value)")
+            }
+        }
+        lines.append("\(indent)    case unknown(UInt16)")
+        lines.append("\(indent)}")
+    }
+
     private func emitBuilderField(
         _ field: Schema.Field, nodes: [Schema.ID: Schema.Node], names: [Schema.ID: String],
-        indent: String,
+        selection: String?, indent: String,
         into lines: inout [String]
     ) throws {
         let originalName = try field.name
@@ -246,124 +432,218 @@ public struct SwiftGenerator {
         let offset = try field.offset
         switch try type.kind {
         case .void:
-            break
+            if let selection {
+                lines.append("\(indent)public func \(method)() throws {")
+                lines.append(selection)
+                lines.append("\(indent)}")
+            }
         case .bool:
-            lines.append(
-                "\(indent)public func \(method)(_ value: Bool) throws { try raw.setBool(atBit: \(offset), to: value, default: \(try defaultLiteral(field, names: names))) }"
-            )
+            try emitSetter(
+                signature: "\(method)(_ value: Bool)", selection: selection, indent: indent,
+                statement:
+                    "try raw.setBool(atBit: \(offset), to: value, default: \(try defaultLiteral(field, names: names)))",
+                into: &lines)
         case .int8, .int16, .int32, .int64, .uint8, .uint16, .uint32, .uint64:
-            lines.append(
-                "\(indent)public func \(method)(_ value: \(swift)) throws { try raw.setInteger(atByte: \(try byteOffset(type, offset)), to: value, default: \(try defaultLiteral(field, names: names))) }"
-            )
+            try emitSetter(
+                signature: "\(method)(_ value: \(swift))", selection: selection, indent: indent,
+                statement:
+                    "try raw.setInteger(atByte: \(try byteOffset(type, offset)), to: value, default: \(try defaultLiteral(field, names: names)))",
+                into: &lines)
         case .float32:
-            lines.append(
-                "\(indent)public func \(method)(_ value: Float) throws { try raw.setFloat32(atByte: \(offset * 4), to: value, default: \(try defaultLiteral(field, names: names))) }"
-            )
+            try emitSetter(
+                signature: "\(method)(_ value: Float)", selection: selection, indent: indent,
+                statement:
+                    "try raw.setFloat32(atByte: \(offset * 4), to: value, default: \(try defaultLiteral(field, names: names)))",
+                into: &lines)
         case .float64:
-            lines.append(
-                "\(indent)public func \(method)(_ value: Double) throws { try raw.setFloat64(atByte: \(offset * 8), to: value, default: \(try defaultLiteral(field, names: names))) }"
-            )
+            try emitSetter(
+                signature: "\(method)(_ value: Double)", selection: selection, indent: indent,
+                statement:
+                    "try raw.setFloat64(atByte: \(offset * 8), to: value, default: \(try defaultLiteral(field, names: names)))",
+                into: &lines)
         case .enum:
-            lines.append(
-                "\(indent)public func \(method)(_ value: \(swift)) throws { try raw.setInteger(atByte: \(offset * 2), to: value.rawValue, default: \(try defaultLiteral(field, names: names)).rawValue) }"
-            )
+            try emitSetter(
+                signature: "\(method)(_ value: \(swift))", selection: selection, indent: indent,
+                statement:
+                    "try raw.setInteger(atByte: \(offset * 2), to: value.rawValue, default: \(try defaultLiteral(field, names: names)).rawValue)",
+                into: &lines)
         case .text:
-            lines.append(
-                "\(indent)public func \(method)(_ value: String) throws { _ = try raw.setTextField(at: \(offset), to: value) }"
-            )
+            try emitSetter(
+                signature: "\(method)(_ value: String)", selection: selection, indent: indent,
+                statement: "_ = try raw.setTextField(at: \(offset), to: value)", into: &lines)
         case .data:
-            lines.append(
-                "\(indent)public func \(method)(_ value: [UInt8]) throws { _ = try raw.setDataField(at: \(offset), to: value) }"
-            )
+            try emitSetter(
+                signature: "\(method)(_ value: [UInt8])", selection: selection, indent: indent,
+                statement: "_ = try raw.setDataField(at: \(offset), to: value)", into: &lines)
         case .struct:
             let base = try schemaName(type, names: names)
-            lines.append(
-                "\(indent)public func \(method)(_ value: \(swift)) throws { try raw.setStructField(at: \(offset), copying: value.raw) }"
+            try emitSetter(
+                signature: "\(method)(_ value: \(swift))", selection: selection, indent: indent,
+                statement: "try raw.setStructField(at: \(offset), copying: value.raw)", into: &lines
             )
             lines.append(
-                "\(indent)public func init\(upperFirst(originalName))() throws -> \(base).Builder { \(base).Builder(try raw.initStructField(at: \(offset), dataWords: \(try structSize(type, nodes: nodes).0), pointerCount: \(try structSize(type, nodes: nodes).1))) }"
+                "\(indent)public func init\(upperFirst(originalName))() throws -> \(base).Builder {"
             )
+            if let selection { lines.append(selection) }
+            lines.append(
+                "\(indent)    return \(base).Builder(try raw.initStructField(at: \(offset), dataWords: \(try structSize(type, nodes: nodes).0), pointerCount: \(try structSize(type, nodes: nodes).1)))"
+            )
+            lines.append("\(indent)}")
         case .list:
             let element = try type.elementType
             if try element.kind == .struct {
                 let size = try structSize(element, nodes: nodes)
                 lines.append(
-                    "\(indent)public func init\(upperFirst(originalName))(count: Int) throws -> StructListBuilder { try raw.initStructListField(at: \(offset), count: count, dataWords: \(size.0), pointerCount: \(size.1)) }"
+                    "\(indent)public func init\(upperFirst(originalName))(count: Int) throws -> StructListBuilder {"
                 )
+                if let selection { lines.append(selection) }
+                lines.append(
+                    "\(indent)    return try raw.initStructListField(at: \(offset), count: count, dataWords: \(size.0), pointerCount: \(size.1))"
+                )
+                lines.append("\(indent)}")
             } else {
                 lines.append(
-                    "\(indent)public func init\(upperFirst(originalName))(count: Int) throws -> ListBuilder { try raw.initListField(at: \(offset), elementSize: \(try listElementSize(element)), count: count) }"
+                    "\(indent)public func init\(upperFirst(originalName))(count: Int) throws -> ListBuilder {"
                 )
+                if let selection { lines.append(selection) }
+                lines.append(
+                    "\(indent)    return try raw.initListField(at: \(offset), elementSize: \(try listElementSize(element)), count: count)"
+                )
+                lines.append("\(indent)}")
             }
             try emitListSetter(
                 method: method, element: element, offset: offset, nodes: nodes, names: names,
-                indent: indent, into: &lines)
+                selection: selection, indent: indent, into: &lines)
+        case .anyPointer:
+            let pointerKind = try type.anyPointerKind
+            let statement: String
+            switch pointerKind {
+            case .struct: statement = "try raw.anyPointerField(at: \(offset)).setStruct(value)"
+            case .list: statement = "try raw.anyPointerField(at: \(offset)).setList(value)"
+            default: statement = "try raw.anyPointerField(at: \(offset)).set(value)"
+            }
+            try emitSetter(
+                signature: "\(method)(_ value: \(swift))", selection: selection,
+                indent: indent, statement: statement, into: &lines)
+            lines.append(
+                "\(indent)public var \(swiftIdentifier(originalName)): AnyPointerBuilder { get throws { try raw.anyPointerField(at: \(offset)) } }"
+            )
         default:
             break
         }
     }
 
+    private func emitSetter(
+        signature: String, selection: String?, indent: String, statement: String,
+        into lines: inout [String]
+    ) throws {
+        lines.append("\(indent)public func \(signature) throws {")
+        if let selection { lines.append(selection) }
+        lines.append("\(indent)    \(statement)")
+        lines.append("\(indent)}")
+    }
+
     private func emitListSetter(
         method: String, element: Schema.`Type`, offset: UInt32,
-        nodes: [Schema.ID: Schema.Node], names: [Schema.ID: String], indent: String,
+        nodes: [Schema.ID: Schema.Node], names: [Schema.ID: String], selection: String?,
+        indent: String,
         into lines: inout [String]
     ) throws {
         switch try element.kind {
-        case .list, .interface, .anyPointer, .unknown:
+        case .interface, .unknown:
             return
         default:
             break
         }
         let valueType = try swiftType(element, names: names)
         lines.append("\(indent)public func \(method)(_ values: [\(valueType)]) throws {")
+        if let selection { lines.append(selection) }
+        try emitListInitializationAndFill(
+            element: element, owner: "raw", fieldOffset: offset, values: "values", depth: 0,
+            nodes: nodes, indent: indent + "    ", into: &lines)
+        lines.append("\(indent)}")
+    }
+
+    private func emitListInitializationAndFill(
+        element: Schema.`Type`, owner: String, fieldOffset: UInt32?, values: String, depth: Int,
+        nodes: [Schema.ID: Schema.Node], indent: String, into lines: inout [String]
+    ) throws {
+        let list = "list\(depth)"
+        let initializer: String
+        if try element.kind == .struct {
+            let size = try structSize(element, nodes: nodes)
+            if let fieldOffset {
+                initializer =
+                    "try \(owner).initStructListField(at: \(fieldOffset), count: \(values).count, dataWords: \(size.0), pointerCount: \(size.1))"
+            } else {
+                initializer = "try \(owner)"
+            }
+        } else if let fieldOffset {
+            initializer =
+                "try \(owner).initListField(at: \(fieldOffset), elementSize: \(try listElementSize(element)), count: \(values).count)"
+        } else {
+            initializer = "try \(owner)"
+        }
+        if try element.kind == .void {
+            lines.append("\(indent)_ = \(initializer)")
+            return
+        }
+        lines.append("\(indent)let \(list) = \(initializer)")
         switch try element.kind {
         case .struct:
-            let size = try structSize(element, nodes: nodes)
             lines.append(
-                "\(indent)    let list = try raw.initStructListField(at: \(offset), count: values.count, dataWords: \(size.0), pointerCount: \(size.1))"
+                "\(indent)for (index, value) in \(values).enumerated() { try \(list)[index].copyContent(from: value.raw) }"
             )
+        case .bool:
             lines.append(
-                "\(indent)    for (index, value) in values.enumerated() { try list[index].copyContent(from: value.raw) }"
+                "\(indent)for (index, value) in \(values).enumerated() { try \(list).setBool(at: index, to: value) }"
             )
-        default:
-            let binding = try element.kind == .void ? "_" : "let list"
+        case .int8, .int16, .int32, .int64, .uint8, .uint16, .uint32, .uint64:
             lines.append(
-                "\(indent)    \(binding) = try raw.initListField(at: \(offset), elementSize: \(try listElementSize(element)), count: values.count)"
+                "\(indent)for (index, value) in \(values).enumerated() { try \(list).setInteger(at: index, to: value) }"
             )
-            switch try element.kind {
-            case .void: break
-            case .bool:
-                lines.append(
-                    "\(indent)    for (index, value) in values.enumerated() { try list.setBool(at: index, to: value) }"
-                )
-            case .int8, .int16, .int32, .int64, .uint8, .uint16, .uint32, .uint64:
-                lines.append(
-                    "\(indent)    for (index, value) in values.enumerated() { try list.setInteger(at: index, to: value) }"
-                )
-            case .float32:
-                lines.append(
-                    "\(indent)    for (index, value) in values.enumerated() { try list.setFloat32(at: index, to: value) }"
-                )
-            case .float64:
-                lines.append(
-                    "\(indent)    for (index, value) in values.enumerated() { try list.setFloat64(at: index, to: value) }"
-                )
-            case .enum:
-                lines.append(
-                    "\(indent)    for (index, value) in values.enumerated() { try list.setInteger(at: index, to: value.rawValue) }"
-                )
-            case .text:
-                lines.append(
-                    "\(indent)    for (index, value) in values.enumerated() { try list.setText(at: index, to: value) }"
-                )
-            case .data:
-                lines.append(
-                    "\(indent)    for (index, value) in values.enumerated() { try list.setData(at: index, to: value) }"
-                )
-            default: break
+        case .float32:
+            lines.append(
+                "\(indent)for (index, value) in \(values).enumerated() { try \(list).setFloat32(at: index, to: value) }"
+            )
+        case .float64:
+            lines.append(
+                "\(indent)for (index, value) in \(values).enumerated() { try \(list).setFloat64(at: index, to: value) }"
+            )
+        case .enum:
+            lines.append(
+                "\(indent)for (index, value) in \(values).enumerated() { try \(list).setInteger(at: index, to: value.rawValue) }"
+            )
+        case .text:
+            lines.append(
+                "\(indent)for (index, value) in \(values).enumerated() { try \(list).setText(at: index, to: value) }"
+            )
+        case .data:
+            lines.append(
+                "\(indent)for (index, value) in \(values).enumerated() { try \(list).setData(at: index, to: value) }"
+            )
+        case .anyPointer:
+            lines.append(
+                "\(indent)for (index, value) in \(values).enumerated() { try \(list).anyPointer(at: index).set(value) }"
+            )
+        case .list:
+            let child = try element.elementType
+            lines.append("\(indent)for (index, value) in \(values).enumerated() {")
+            let childInit: String
+            if try child.kind == .struct {
+                let size = try structSize(child, nodes: nodes)
+                childInit =
+                    "\(list).initStructList(at: index, count: value.count, dataWords: \(size.0), pointerCount: \(size.1))"
+            } else {
+                childInit =
+                    "\(list).initList(at: index, elementSize: \(try listElementSize(child)), count: value.count)"
             }
+            try emitListInitializationAndFill(
+                element: child, owner: childInit, fieldOffset: nil, values: "value",
+                depth: depth + 1, nodes: nodes, indent: indent + "    ", into: &lines)
+            lines.append("\(indent)}")
+        default: break
         }
-        lines.append("\(indent)}")
     }
 
     private func emitConstant(
@@ -439,11 +719,107 @@ private func buildNames(nodes: [Schema.ID: Schema.Node]) throws -> [Schema.ID: S
             result[id] = name
             try visit(child, prefix: name)
         }
+        if try node.kind == .struct {
+            for field in try node.fields where try field.kind == .group {
+                let id = try field.groupTypeID
+                guard let child = nodes[id] else { throw SwiftGeneratorError.missingNode(id) }
+                let component = try groupName(field)
+                let name = prefix.isEmpty ? component : prefix + "." + component
+                result[id] = name
+                try visit(child, prefix: name)
+            }
+        }
     }
     for node in nodes.values where try node.kind == .file {
         try visit(node, prefix: "")
     }
     return result
+}
+
+private struct UnionStorage {
+    var byteRanges = Set<Range<Int>>()
+    var bitOffsets = Set<Int>()
+    var pointerIndices = Set<Int>()
+}
+
+private func unionStorage(
+    _ node: Schema.Node, nodes: [Schema.ID: Schema.Node]
+) throws -> UnionStorage {
+    var result = UnionStorage()
+    for field in try node.fields
+    where try field.discriminantValue != Schema.Field.noDiscriminant {
+        try collectStorage(field, nodes: nodes, into: &result)
+    }
+    return result
+}
+
+private func collectStorage(
+    _ field: Schema.Field, nodes: [Schema.ID: Schema.Node], into result: inout UnionStorage
+) throws {
+    switch try field.kind {
+    case .slot:
+        let type = try field.type
+        let offset = try field.offset
+        if isPointer(try type.kind) {
+            result.pointerIndices.insert(Int(offset))
+        } else {
+            switch try type.kind {
+            case .void: break
+            case .bool: result.bitOffsets.insert(Int(offset))
+            default:
+                let start = Int(try byteOffset(type, offset))
+                let width: Int
+                switch try type.kind {
+                case .int8, .uint8: width = 1
+                case .int16, .uint16, .enum: width = 2
+                case .int32, .uint32, .float32: width = 4
+                case .int64, .uint64, .float64: width = 8
+                default: width = 0
+                }
+                if width > 0 { result.byteRanges.insert(start..<(start + width)) }
+            }
+        }
+    case .group:
+        let id = try field.groupTypeID
+        guard let group = nodes[id] else { throw SwiftGeneratorError.missingNode(id) }
+        if try group.discriminantCount > 0 {
+            let start = Int(try group.discriminantOffset) * 2
+            result.byteRanges.insert(start..<(start + 2))
+        }
+        for child in try group.fields {
+            try collectStorage(child, nodes: nodes, into: &result)
+        }
+    case .unknown(let value):
+        throw SwiftGeneratorError.unsupportedSchema("field discriminant \(value)")
+    }
+}
+
+private func unionSelection(
+    field: Schema.Field, node: Schema.Node, storage: UnionStorage, indent: String
+) throws -> String {
+    let ranges = storage.byteRanges.sorted {
+        ($0.lowerBound, $0.upperBound) < ($1.lowerBound, $1.upperBound)
+    }.map { "\($0.lowerBound)..<\($0.upperBound)" }.joined(separator: ", ")
+    let bits = storage.bitOffsets.sorted().map(String.init).joined(separator: ", ")
+    let pointers = storage.pointerIndices.sorted().map(String.init).joined(separator: ", ")
+    return
+        "\(indent)try raw.selectUnion(discriminant: \(try field.discriminantValue), atByte: \(try node.discriminantOffset * 2), clearingData: [\(ranges)], clearingBits: [\(bits)], clearingPointers: [\(pointers)])"
+}
+
+private func groupName(_ field: Schema.Field) throws -> String {
+    swiftIdentifier(upperFirst(try field.name))
+}
+
+private func parameterIndex(_ field: Schema.Field, scopeID: Schema.ID) throws -> Int? {
+    guard try field.kind == .slot else { return nil }
+    let type = try field.type
+    guard try type.kind == .anyPointer else { return nil }
+    if case .parameter(let parameterScope, let index) = try type.anyPointerKind,
+        parameterScope == scopeID
+    {
+        return Int(index)
+    }
+    return nil
 }
 
 private func swiftType(_ type: Schema.`Type`, names: [Schema.ID: String]) throws -> String {
@@ -466,7 +842,12 @@ private func swiftType(_ type: Schema.`Type`, names: [Schema.ID: String]) throws
     case .enum: return try schemaName(type, names: names)
     case .struct: return try schemaName(type, names: names) + ".Reader"
     case .interface: return try schemaName(type, names: names) + ".Client"
-    case .anyPointer: return "AnyPointerReader"
+    case .anyPointer:
+        switch try type.anyPointerKind {
+        case .struct: return "StructReader"
+        case .list: return "ListReader"
+        default: return "AnyPointerReader"
+        }
     case .unknown(let value):
         throw SwiftGeneratorError.unsupportedSchema("type discriminant \(value)")
     }
@@ -509,7 +890,11 @@ private func readExpression(
         return
             "let list = try raw.hasPointer(at: \(offset)) ? raw.listField(at: \(offset)) : MessageFraming.decodePrefix(\(byteArray(bytes))).reader().rootList(); return \(try listRead(type.elementType, list: "list", names: names, depth: 0))"
     case .anyPointer:
-        return "return try raw.anyPointerField(at: \(offset))"
+        switch try type.anyPointerKind {
+        case .struct: return "return try raw.anyPointerField(at: \(offset)).asStruct()"
+        case .list: return "return try raw.anyPointerField(at: \(offset)).asList()"
+        default: return "return try raw.anyPointerField(at: \(offset))"
+        }
     case .interface:
         return "return \(try swiftType(type, names: names))(try raw.anyPointerField(at: \(offset)))"
     case .unknown(let value):

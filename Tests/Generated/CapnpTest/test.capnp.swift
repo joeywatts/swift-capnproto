@@ -83,6 +83,14 @@ public var constTest: SimpleTestStruct.Reader {
 
 public enum SimpleTestStruct {
     public static let schemaID: UInt64 = 17691405282575389053
+    public enum Pointer: CapnProtoPointerType {
+        public static func read(from pointer: AnyPointerReader) throws -> Reader {
+            Reader(try pointer.asStruct())
+        }
+        public static func write(_ value: Reader, to pointer: AnyPointerBuilder) throws {
+            try pointer.setStruct(value.raw)
+        }
+    }
 
     public struct Reader {
         public let raw: StructReader
@@ -106,7 +114,9 @@ public enum SimpleTestStruct {
         public func setInt(_ value: Int32) throws {
             try raw.setInteger(atByte: 0, to: value, default: Int32(0))
         }
-        public func setMsg(_ value: String) throws { _ = try raw.setTextField(at: 0, to: value) }
+        public func setMsg(_ value: String) throws {
+            _ = try raw.setTextField(at: 0, to: value)
+        }
     }
 
     public static func readRoot(from bytes: [UInt8], options: ReaderOptions = ReaderOptions())
@@ -124,6 +134,14 @@ public enum SimpleTestStruct {
 
 public enum ListTest {
     public static let schemaID: UInt64 = 13465794386485367550
+    public enum Pointer: CapnProtoPointerType {
+        public static func read(from pointer: AnyPointerReader) throws -> Reader {
+            Reader(try pointer.asStruct())
+        }
+        public static func write(_ value: Reader, to pointer: AnyPointerBuilder) throws {
+            try pointer.setStruct(value.raw)
+        }
+    }
 
     public struct Reader {
         public let raw: StructReader
@@ -147,11 +165,11 @@ public enum ListTest {
         public let raw: StructBuilder
         public init(_ raw: StructBuilder) { self.raw = raw }
         public func initTextList(count: Int) throws -> ListBuilder {
-            try raw.initListField(at: 0, elementSize: .pointer, count: count)
+            return try raw.initListField(at: 0, elementSize: .pointer, count: count)
         }
         public func setTextList(_ values: [String]) throws {
-            let list = try raw.initListField(at: 0, elementSize: .pointer, count: values.count)
-            for (index, value) in values.enumerated() { try list.setText(at: index, to: value) }
+            let list0 = try raw.initListField(at: 0, elementSize: .pointer, count: values.count)
+            for (index, value) in values.enumerated() { try list0.setText(at: index, to: value) }
         }
     }
 
@@ -183,6 +201,14 @@ public struct TestEnum: RawRepresentable, Equatable, Hashable, Sendable {
 
 public enum TestAllTypes {
     public static let schemaID: UInt64 = 18165569185690506578
+    public enum Pointer: CapnProtoPointerType {
+        public static func read(from pointer: AnyPointerReader) throws -> Reader {
+            Reader(try pointer.asStruct())
+        }
+        public static func write(_ value: Reader, to pointer: AnyPointerBuilder) throws {
+            try pointer.setStruct(value.raw)
+        }
+    }
 
     public struct Reader {
         public let raw: StructReader
@@ -521,130 +547,131 @@ public enum TestAllTypes {
             try raw.setStructField(at: 2, copying: value.raw)
         }
         public func initStructField() throws -> TestAllTypes.Builder {
-            TestAllTypes.Builder(try raw.initStructField(at: 2, dataWords: 6, pointerCount: 20))
+            return TestAllTypes.Builder(
+                try raw.initStructField(at: 2, dataWords: 6, pointerCount: 20))
         }
         public func setEnumField(_ value: TestEnum) throws {
             try raw.setInteger(
                 atByte: 36, to: value.rawValue, default: TestEnum(rawValue: 0).rawValue)
         }
         public func initVoidList(count: Int) throws -> ListBuilder {
-            try raw.initListField(at: 3, elementSize: .void, count: count)
+            return try raw.initListField(at: 3, elementSize: .void, count: count)
         }
         public func setVoidList(_ values: [Void]) throws {
             _ = try raw.initListField(at: 3, elementSize: .void, count: values.count)
         }
         public func initBoolList(count: Int) throws -> ListBuilder {
-            try raw.initListField(at: 4, elementSize: .bit, count: count)
+            return try raw.initListField(at: 4, elementSize: .bit, count: count)
         }
         public func setBoolList(_ values: [Bool]) throws {
-            let list = try raw.initListField(at: 4, elementSize: .bit, count: values.count)
-            for (index, value) in values.enumerated() { try list.setBool(at: index, to: value) }
+            let list0 = try raw.initListField(at: 4, elementSize: .bit, count: values.count)
+            for (index, value) in values.enumerated() { try list0.setBool(at: index, to: value) }
         }
         public func initInt8List(count: Int) throws -> ListBuilder {
-            try raw.initListField(at: 5, elementSize: .byte, count: count)
+            return try raw.initListField(at: 5, elementSize: .byte, count: count)
         }
         public func setInt8List(_ values: [Int8]) throws {
-            let list = try raw.initListField(at: 5, elementSize: .byte, count: values.count)
-            for (index, value) in values.enumerated() { try list.setInteger(at: index, to: value) }
+            let list0 = try raw.initListField(at: 5, elementSize: .byte, count: values.count)
+            for (index, value) in values.enumerated() { try list0.setInteger(at: index, to: value) }
         }
         public func initInt16List(count: Int) throws -> ListBuilder {
-            try raw.initListField(at: 6, elementSize: .twoBytes, count: count)
+            return try raw.initListField(at: 6, elementSize: .twoBytes, count: count)
         }
         public func setInt16List(_ values: [Int16]) throws {
-            let list = try raw.initListField(at: 6, elementSize: .twoBytes, count: values.count)
-            for (index, value) in values.enumerated() { try list.setInteger(at: index, to: value) }
+            let list0 = try raw.initListField(at: 6, elementSize: .twoBytes, count: values.count)
+            for (index, value) in values.enumerated() { try list0.setInteger(at: index, to: value) }
         }
         public func initInt32List(count: Int) throws -> ListBuilder {
-            try raw.initListField(at: 7, elementSize: .fourBytes, count: count)
+            return try raw.initListField(at: 7, elementSize: .fourBytes, count: count)
         }
         public func setInt32List(_ values: [Int32]) throws {
-            let list = try raw.initListField(at: 7, elementSize: .fourBytes, count: values.count)
-            for (index, value) in values.enumerated() { try list.setInteger(at: index, to: value) }
+            let list0 = try raw.initListField(at: 7, elementSize: .fourBytes, count: values.count)
+            for (index, value) in values.enumerated() { try list0.setInteger(at: index, to: value) }
         }
         public func initInt64List(count: Int) throws -> ListBuilder {
-            try raw.initListField(at: 8, elementSize: .eightBytes, count: count)
+            return try raw.initListField(at: 8, elementSize: .eightBytes, count: count)
         }
         public func setInt64List(_ values: [Int64]) throws {
-            let list = try raw.initListField(at: 8, elementSize: .eightBytes, count: values.count)
-            for (index, value) in values.enumerated() { try list.setInteger(at: index, to: value) }
+            let list0 = try raw.initListField(at: 8, elementSize: .eightBytes, count: values.count)
+            for (index, value) in values.enumerated() { try list0.setInteger(at: index, to: value) }
         }
         public func initUInt8List(count: Int) throws -> ListBuilder {
-            try raw.initListField(at: 9, elementSize: .byte, count: count)
+            return try raw.initListField(at: 9, elementSize: .byte, count: count)
         }
         public func setUInt8List(_ values: [UInt8]) throws {
-            let list = try raw.initListField(at: 9, elementSize: .byte, count: values.count)
-            for (index, value) in values.enumerated() { try list.setInteger(at: index, to: value) }
+            let list0 = try raw.initListField(at: 9, elementSize: .byte, count: values.count)
+            for (index, value) in values.enumerated() { try list0.setInteger(at: index, to: value) }
         }
         public func initUInt16List(count: Int) throws -> ListBuilder {
-            try raw.initListField(at: 10, elementSize: .twoBytes, count: count)
+            return try raw.initListField(at: 10, elementSize: .twoBytes, count: count)
         }
         public func setUInt16List(_ values: [UInt16]) throws {
-            let list = try raw.initListField(at: 10, elementSize: .twoBytes, count: values.count)
-            for (index, value) in values.enumerated() { try list.setInteger(at: index, to: value) }
+            let list0 = try raw.initListField(at: 10, elementSize: .twoBytes, count: values.count)
+            for (index, value) in values.enumerated() { try list0.setInteger(at: index, to: value) }
         }
         public func initUInt32List(count: Int) throws -> ListBuilder {
-            try raw.initListField(at: 11, elementSize: .fourBytes, count: count)
+            return try raw.initListField(at: 11, elementSize: .fourBytes, count: count)
         }
         public func setUInt32List(_ values: [UInt32]) throws {
-            let list = try raw.initListField(at: 11, elementSize: .fourBytes, count: values.count)
-            for (index, value) in values.enumerated() { try list.setInteger(at: index, to: value) }
+            let list0 = try raw.initListField(at: 11, elementSize: .fourBytes, count: values.count)
+            for (index, value) in values.enumerated() { try list0.setInteger(at: index, to: value) }
         }
         public func initUInt64List(count: Int) throws -> ListBuilder {
-            try raw.initListField(at: 12, elementSize: .eightBytes, count: count)
+            return try raw.initListField(at: 12, elementSize: .eightBytes, count: count)
         }
         public func setUInt64List(_ values: [UInt64]) throws {
-            let list = try raw.initListField(at: 12, elementSize: .eightBytes, count: values.count)
-            for (index, value) in values.enumerated() { try list.setInteger(at: index, to: value) }
+            let list0 = try raw.initListField(at: 12, elementSize: .eightBytes, count: values.count)
+            for (index, value) in values.enumerated() { try list0.setInteger(at: index, to: value) }
         }
         public func initFloat32List(count: Int) throws -> ListBuilder {
-            try raw.initListField(at: 13, elementSize: .fourBytes, count: count)
+            return try raw.initListField(at: 13, elementSize: .fourBytes, count: count)
         }
         public func setFloat32List(_ values: [Float]) throws {
-            let list = try raw.initListField(at: 13, elementSize: .fourBytes, count: values.count)
-            for (index, value) in values.enumerated() { try list.setFloat32(at: index, to: value) }
+            let list0 = try raw.initListField(at: 13, elementSize: .fourBytes, count: values.count)
+            for (index, value) in values.enumerated() { try list0.setFloat32(at: index, to: value) }
         }
         public func initFloat64List(count: Int) throws -> ListBuilder {
-            try raw.initListField(at: 14, elementSize: .eightBytes, count: count)
+            return try raw.initListField(at: 14, elementSize: .eightBytes, count: count)
         }
         public func setFloat64List(_ values: [Double]) throws {
-            let list = try raw.initListField(at: 14, elementSize: .eightBytes, count: values.count)
-            for (index, value) in values.enumerated() { try list.setFloat64(at: index, to: value) }
+            let list0 = try raw.initListField(at: 14, elementSize: .eightBytes, count: values.count)
+            for (index, value) in values.enumerated() { try list0.setFloat64(at: index, to: value) }
         }
         public func initTextList(count: Int) throws -> ListBuilder {
-            try raw.initListField(at: 15, elementSize: .pointer, count: count)
+            return try raw.initListField(at: 15, elementSize: .pointer, count: count)
         }
         public func setTextList(_ values: [String]) throws {
-            let list = try raw.initListField(at: 15, elementSize: .pointer, count: values.count)
-            for (index, value) in values.enumerated() { try list.setText(at: index, to: value) }
+            let list0 = try raw.initListField(at: 15, elementSize: .pointer, count: values.count)
+            for (index, value) in values.enumerated() { try list0.setText(at: index, to: value) }
         }
         public func initDataList(count: Int) throws -> ListBuilder {
-            try raw.initListField(at: 16, elementSize: .pointer, count: count)
+            return try raw.initListField(at: 16, elementSize: .pointer, count: count)
         }
         public func setDataList(_ values: [[UInt8]]) throws {
-            let list = try raw.initListField(at: 16, elementSize: .pointer, count: values.count)
-            for (index, value) in values.enumerated() { try list.setData(at: index, to: value) }
+            let list0 = try raw.initListField(at: 16, elementSize: .pointer, count: values.count)
+            for (index, value) in values.enumerated() { try list0.setData(at: index, to: value) }
         }
         public func initStructList(count: Int) throws -> StructListBuilder {
-            try raw.initStructListField(at: 17, count: count, dataWords: 6, pointerCount: 20)
+            return try raw.initStructListField(at: 17, count: count, dataWords: 6, pointerCount: 20)
         }
         public func setStructList(_ values: [TestAllTypes.Reader]) throws {
-            let list = try raw.initStructListField(
+            let list0 = try raw.initStructListField(
                 at: 17, count: values.count, dataWords: 6, pointerCount: 20)
             for (index, value) in values.enumerated() {
-                try list[index].copyContent(from: value.raw)
+                try list0[index].copyContent(from: value.raw)
             }
         }
         public func initEnumList(count: Int) throws -> ListBuilder {
-            try raw.initListField(at: 18, elementSize: .twoBytes, count: count)
+            return try raw.initListField(at: 18, elementSize: .twoBytes, count: count)
         }
         public func setEnumList(_ values: [TestEnum]) throws {
-            let list = try raw.initListField(at: 18, elementSize: .twoBytes, count: values.count)
+            let list0 = try raw.initListField(at: 18, elementSize: .twoBytes, count: values.count)
             for (index, value) in values.enumerated() {
-                try list.setInteger(at: index, to: value.rawValue)
+                try list0.setInteger(at: index, to: value.rawValue)
             }
         }
         public func initInterfaceList(count: Int) throws -> ListBuilder {
-            try raw.initListField(at: 19, elementSize: .void, count: count)
+            return try raw.initListField(at: 19, elementSize: .void, count: count)
         }
         public func setInterfaceList(_ values: [Void]) throws {
             _ = try raw.initListField(at: 19, elementSize: .void, count: values.count)
@@ -666,6 +693,14 @@ public enum TestAllTypes {
 
 public enum TestDefaults {
     public static let schemaID: UInt64 = 9491271142913699753
+    public enum Pointer: CapnProtoPointerType {
+        public static func read(from pointer: AnyPointerReader) throws -> Reader {
+            Reader(try pointer.asStruct())
+        }
+        public static func write(_ value: Reader, to pointer: AnyPointerBuilder) throws {
+            try pointer.setStruct(value.raw)
+        }
+    }
 
     public struct Reader {
         public let raw: StructReader
@@ -1130,130 +1165,131 @@ public enum TestDefaults {
             try raw.setStructField(at: 2, copying: value.raw)
         }
         public func initStructField() throws -> TestAllTypes.Builder {
-            TestAllTypes.Builder(try raw.initStructField(at: 2, dataWords: 6, pointerCount: 20))
+            return TestAllTypes.Builder(
+                try raw.initStructField(at: 2, dataWords: 6, pointerCount: 20))
         }
         public func setEnumField(_ value: TestEnum) throws {
             try raw.setInteger(
                 atByte: 36, to: value.rawValue, default: TestEnum(rawValue: 5).rawValue)
         }
         public func initVoidList(count: Int) throws -> ListBuilder {
-            try raw.initListField(at: 3, elementSize: .void, count: count)
+            return try raw.initListField(at: 3, elementSize: .void, count: count)
         }
         public func setVoidList(_ values: [Void]) throws {
             _ = try raw.initListField(at: 3, elementSize: .void, count: values.count)
         }
         public func initBoolList(count: Int) throws -> ListBuilder {
-            try raw.initListField(at: 4, elementSize: .bit, count: count)
+            return try raw.initListField(at: 4, elementSize: .bit, count: count)
         }
         public func setBoolList(_ values: [Bool]) throws {
-            let list = try raw.initListField(at: 4, elementSize: .bit, count: values.count)
-            for (index, value) in values.enumerated() { try list.setBool(at: index, to: value) }
+            let list0 = try raw.initListField(at: 4, elementSize: .bit, count: values.count)
+            for (index, value) in values.enumerated() { try list0.setBool(at: index, to: value) }
         }
         public func initInt8List(count: Int) throws -> ListBuilder {
-            try raw.initListField(at: 5, elementSize: .byte, count: count)
+            return try raw.initListField(at: 5, elementSize: .byte, count: count)
         }
         public func setInt8List(_ values: [Int8]) throws {
-            let list = try raw.initListField(at: 5, elementSize: .byte, count: values.count)
-            for (index, value) in values.enumerated() { try list.setInteger(at: index, to: value) }
+            let list0 = try raw.initListField(at: 5, elementSize: .byte, count: values.count)
+            for (index, value) in values.enumerated() { try list0.setInteger(at: index, to: value) }
         }
         public func initInt16List(count: Int) throws -> ListBuilder {
-            try raw.initListField(at: 6, elementSize: .twoBytes, count: count)
+            return try raw.initListField(at: 6, elementSize: .twoBytes, count: count)
         }
         public func setInt16List(_ values: [Int16]) throws {
-            let list = try raw.initListField(at: 6, elementSize: .twoBytes, count: values.count)
-            for (index, value) in values.enumerated() { try list.setInteger(at: index, to: value) }
+            let list0 = try raw.initListField(at: 6, elementSize: .twoBytes, count: values.count)
+            for (index, value) in values.enumerated() { try list0.setInteger(at: index, to: value) }
         }
         public func initInt32List(count: Int) throws -> ListBuilder {
-            try raw.initListField(at: 7, elementSize: .fourBytes, count: count)
+            return try raw.initListField(at: 7, elementSize: .fourBytes, count: count)
         }
         public func setInt32List(_ values: [Int32]) throws {
-            let list = try raw.initListField(at: 7, elementSize: .fourBytes, count: values.count)
-            for (index, value) in values.enumerated() { try list.setInteger(at: index, to: value) }
+            let list0 = try raw.initListField(at: 7, elementSize: .fourBytes, count: values.count)
+            for (index, value) in values.enumerated() { try list0.setInteger(at: index, to: value) }
         }
         public func initInt64List(count: Int) throws -> ListBuilder {
-            try raw.initListField(at: 8, elementSize: .eightBytes, count: count)
+            return try raw.initListField(at: 8, elementSize: .eightBytes, count: count)
         }
         public func setInt64List(_ values: [Int64]) throws {
-            let list = try raw.initListField(at: 8, elementSize: .eightBytes, count: values.count)
-            for (index, value) in values.enumerated() { try list.setInteger(at: index, to: value) }
+            let list0 = try raw.initListField(at: 8, elementSize: .eightBytes, count: values.count)
+            for (index, value) in values.enumerated() { try list0.setInteger(at: index, to: value) }
         }
         public func initUInt8List(count: Int) throws -> ListBuilder {
-            try raw.initListField(at: 9, elementSize: .byte, count: count)
+            return try raw.initListField(at: 9, elementSize: .byte, count: count)
         }
         public func setUInt8List(_ values: [UInt8]) throws {
-            let list = try raw.initListField(at: 9, elementSize: .byte, count: values.count)
-            for (index, value) in values.enumerated() { try list.setInteger(at: index, to: value) }
+            let list0 = try raw.initListField(at: 9, elementSize: .byte, count: values.count)
+            for (index, value) in values.enumerated() { try list0.setInteger(at: index, to: value) }
         }
         public func initUInt16List(count: Int) throws -> ListBuilder {
-            try raw.initListField(at: 10, elementSize: .twoBytes, count: count)
+            return try raw.initListField(at: 10, elementSize: .twoBytes, count: count)
         }
         public func setUInt16List(_ values: [UInt16]) throws {
-            let list = try raw.initListField(at: 10, elementSize: .twoBytes, count: values.count)
-            for (index, value) in values.enumerated() { try list.setInteger(at: index, to: value) }
+            let list0 = try raw.initListField(at: 10, elementSize: .twoBytes, count: values.count)
+            for (index, value) in values.enumerated() { try list0.setInteger(at: index, to: value) }
         }
         public func initUInt32List(count: Int) throws -> ListBuilder {
-            try raw.initListField(at: 11, elementSize: .fourBytes, count: count)
+            return try raw.initListField(at: 11, elementSize: .fourBytes, count: count)
         }
         public func setUInt32List(_ values: [UInt32]) throws {
-            let list = try raw.initListField(at: 11, elementSize: .fourBytes, count: values.count)
-            for (index, value) in values.enumerated() { try list.setInteger(at: index, to: value) }
+            let list0 = try raw.initListField(at: 11, elementSize: .fourBytes, count: values.count)
+            for (index, value) in values.enumerated() { try list0.setInteger(at: index, to: value) }
         }
         public func initUInt64List(count: Int) throws -> ListBuilder {
-            try raw.initListField(at: 12, elementSize: .eightBytes, count: count)
+            return try raw.initListField(at: 12, elementSize: .eightBytes, count: count)
         }
         public func setUInt64List(_ values: [UInt64]) throws {
-            let list = try raw.initListField(at: 12, elementSize: .eightBytes, count: values.count)
-            for (index, value) in values.enumerated() { try list.setInteger(at: index, to: value) }
+            let list0 = try raw.initListField(at: 12, elementSize: .eightBytes, count: values.count)
+            for (index, value) in values.enumerated() { try list0.setInteger(at: index, to: value) }
         }
         public func initFloat32List(count: Int) throws -> ListBuilder {
-            try raw.initListField(at: 13, elementSize: .fourBytes, count: count)
+            return try raw.initListField(at: 13, elementSize: .fourBytes, count: count)
         }
         public func setFloat32List(_ values: [Float]) throws {
-            let list = try raw.initListField(at: 13, elementSize: .fourBytes, count: values.count)
-            for (index, value) in values.enumerated() { try list.setFloat32(at: index, to: value) }
+            let list0 = try raw.initListField(at: 13, elementSize: .fourBytes, count: values.count)
+            for (index, value) in values.enumerated() { try list0.setFloat32(at: index, to: value) }
         }
         public func initFloat64List(count: Int) throws -> ListBuilder {
-            try raw.initListField(at: 14, elementSize: .eightBytes, count: count)
+            return try raw.initListField(at: 14, elementSize: .eightBytes, count: count)
         }
         public func setFloat64List(_ values: [Double]) throws {
-            let list = try raw.initListField(at: 14, elementSize: .eightBytes, count: values.count)
-            for (index, value) in values.enumerated() { try list.setFloat64(at: index, to: value) }
+            let list0 = try raw.initListField(at: 14, elementSize: .eightBytes, count: values.count)
+            for (index, value) in values.enumerated() { try list0.setFloat64(at: index, to: value) }
         }
         public func initTextList(count: Int) throws -> ListBuilder {
-            try raw.initListField(at: 15, elementSize: .pointer, count: count)
+            return try raw.initListField(at: 15, elementSize: .pointer, count: count)
         }
         public func setTextList(_ values: [String]) throws {
-            let list = try raw.initListField(at: 15, elementSize: .pointer, count: values.count)
-            for (index, value) in values.enumerated() { try list.setText(at: index, to: value) }
+            let list0 = try raw.initListField(at: 15, elementSize: .pointer, count: values.count)
+            for (index, value) in values.enumerated() { try list0.setText(at: index, to: value) }
         }
         public func initDataList(count: Int) throws -> ListBuilder {
-            try raw.initListField(at: 16, elementSize: .pointer, count: count)
+            return try raw.initListField(at: 16, elementSize: .pointer, count: count)
         }
         public func setDataList(_ values: [[UInt8]]) throws {
-            let list = try raw.initListField(at: 16, elementSize: .pointer, count: values.count)
-            for (index, value) in values.enumerated() { try list.setData(at: index, to: value) }
+            let list0 = try raw.initListField(at: 16, elementSize: .pointer, count: values.count)
+            for (index, value) in values.enumerated() { try list0.setData(at: index, to: value) }
         }
         public func initStructList(count: Int) throws -> StructListBuilder {
-            try raw.initStructListField(at: 17, count: count, dataWords: 6, pointerCount: 20)
+            return try raw.initStructListField(at: 17, count: count, dataWords: 6, pointerCount: 20)
         }
         public func setStructList(_ values: [TestAllTypes.Reader]) throws {
-            let list = try raw.initStructListField(
+            let list0 = try raw.initStructListField(
                 at: 17, count: values.count, dataWords: 6, pointerCount: 20)
             for (index, value) in values.enumerated() {
-                try list[index].copyContent(from: value.raw)
+                try list0[index].copyContent(from: value.raw)
             }
         }
         public func initEnumList(count: Int) throws -> ListBuilder {
-            try raw.initListField(at: 18, elementSize: .twoBytes, count: count)
+            return try raw.initListField(at: 18, elementSize: .twoBytes, count: count)
         }
         public func setEnumList(_ values: [TestEnum]) throws {
-            let list = try raw.initListField(at: 18, elementSize: .twoBytes, count: values.count)
+            let list0 = try raw.initListField(at: 18, elementSize: .twoBytes, count: values.count)
             for (index, value) in values.enumerated() {
-                try list.setInteger(at: index, to: value.rawValue)
+                try list0.setInteger(at: index, to: value.rawValue)
             }
         }
         public func initInterfaceList(count: Int) throws -> ListBuilder {
-            try raw.initListField(at: 19, elementSize: .void, count: count)
+            return try raw.initListField(at: 19, elementSize: .void, count: count)
         }
         public func setInterfaceList(_ values: [Void]) throws {
             _ = try raw.initListField(at: 19, elementSize: .void, count: values.count)

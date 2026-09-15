@@ -1,6 +1,7 @@
 import CapnProto
 import CapnProtoCompiler
 import CapnProtoConformance
+import CapnProtoGeneratedFixtures
 import CapnProtoSchema
 import Foundation
 import Testing
@@ -17,6 +18,97 @@ import Testing
     #expect(keywords.contains("    public enum `Protocol`"))
     #expect(keywords.contains("public struct `Type`"))
     #expect(!first.map(\.path).contains("import-base.capnp.swift"))
+}
+
+// Ported generated-API behavior from capnproto 3a82de9b39736a2625f03c93b2b7c50642dd5b25:
+// encoding-test.c++ Groups/InterleavedGroups/Unions and test.capnp TestAnyPointer/TestGenerics.
+@Test func generatedUnionsGroupsNestedListsGenericsAndAnyPointersRoundTrip() throws {
+    let message = try MessageBuilder()
+    let builder = try Advanced.initRoot(in: message)
+    try builder.setNestedList([[1, 2], [], [UInt16.max]])
+    try builder.initNested().setValue(0xfeed_face)
+    try builder.metadata.setCount(44)
+    try builder.metadata.setLabel("outside union")
+    try builder.setOutsideFlag(true)
+    let nestedElementMessage = try MessageBuilder()
+    let nestedElement = try Advanced.Nested.initRoot(in: nestedElementMessage)
+    try nestedElement.setValue(77)
+    try builder.setNestedStructList([
+        [Advanced.Nested.Reader(try nestedElementMessage.asReader().rootStruct())], [],
+    ])
+
+    let pointerStruct = try builder.payload.initStruct(dataWords: 1, pointerCount: 0)
+    try pointerStruct.setInteger(atByte: 0, to: UInt64(123))
+    let typedList = try builder.typed.initList(elementSize: .twoBytes, count: 2)
+    try typedList.setInteger(at: 0, to: UInt16(7))
+    try typedList.setInteger(at: 1, to: UInt16(8))
+
+    let erasedTextMessage = try MessageBuilder()
+    _ = try erasedTextMessage.setRootText("erased")
+    try builder.setPayload(erasedTextMessage.asReader().rootAnyPointer())
+    let erasedStructMessage = try MessageBuilder()
+    let erasedStruct = try erasedStructMessage.initRootStruct(dataWords: 1, pointerCount: 0)
+    try erasedStruct.setInteger(atByte: 0, to: UInt64(456))
+    try builder.setAnyStruct(erasedStructMessage.asReader().rootStruct())
+    let erasedListMessage = try MessageBuilder()
+    let erasedList = try erasedListMessage.initRootList(elementSize: .byte, count: 2)
+    try erasedList.setInteger(at: 0, to: UInt8(10))
+    try erasedList.setInteger(at: 1, to: UInt8(11))
+    try builder.setAnyList(erasedListMessage.asReader().rootList())
+
+    try builder.setText("discarded")
+    try builder.setNumber(42)
+    var reader = Advanced.Reader(try message.asReader().rootStruct())
+    #expect(try !reader.hasText)
+    guard case .number(let number) = try reader.which else {
+        Issue.record("expected number union member")
+        return
+    }
+    #expect(number == 42)
+
+    let details = try builder.selectDetails()
+    try details.setFlag(true)
+    try details.setNote("selected group")
+    reader = Advanced.Reader(try message.asReader().rootStruct())
+    guard case .details(let selected) = try reader.which else {
+        Issue.record("expected details union member")
+        return
+    }
+    #expect(try selected.flag)
+    #expect(try selected.note == "selected group")
+    #expect(try reader.nestedList == [[1, 2], [], [UInt16.max]])
+    #expect(try reader.nested.value == 0xfeed_face)
+    #expect(try reader.nestedStructList.first?.first?.value == 77)
+    #expect(try reader.nestedStructList.last?.isEmpty == true)
+    #expect(try reader.metadata.count == 44)
+    #expect(try reader.metadata.label == "outside union")
+    #expect(try reader.outsideFlag)
+    #expect(try reader.payload.asText().string == "erased")
+    #expect(try reader.typed.asList().integer(at: 1, as: UInt16.self) == 8)
+    let genericList = Advanced.Generic<CapnProtoAnyList>.Reader(reader)
+    #expect(try genericList.typed.integer(at: 0, as: UInt16.self) == 7)
+    #expect(try reader.anyStruct.integer(atByte: 0, as: UInt64.self) == 456)
+    #expect(try reader.anyList.integer(at: 1, as: UInt8.self) == 11)
+
+    try builder.setUnknownDiscriminant(65_000)
+    reader = Advanced.Reader(try message.asReader().rootStruct())
+    guard case .unknown(let tag) = try reader.which else {
+        Issue.record("expected unknown union discriminant")
+        return
+    }
+    #expect(tag == 65_000)
+    #expect(try reader.details.note == "selected group")
+
+    let genericBuilder = Advanced.Generic<CapnProtoText>.Builder(builder)
+    try genericBuilder.setTyped("typed generic")
+    reader = Advanced.Reader(try message.asReader().rootStruct())
+    #expect(try Advanced.Generic<CapnProtoText>.Reader(reader).typed == "typed generic")
+    #expect(Advanced.genericParameters == ["T"])
+
+    let brandedMessage = try MessageBuilder()
+    let branded = try Branded.initRoot(in: brandedMessage)
+    try branded.initTextBox().setNestedList([[9]])
+    #expect(try Branded.Reader(brandedMessage.asReader().rootStruct()).textBox.nestedList == [[9]])
 }
 
 @Test(arguments: ["actor", "protocol", "extension", "repeat", "ordinaryName"])

@@ -24,7 +24,7 @@ cp "$fixtures"/*.capnp "$inputs/"
 generate() {
   local destination="$1"
   "$capnp" compile -o"$tool:$destination" --src-prefix="$inputs" \
-    "$inputs/keywords.capnp" "$inputs/import-user.capnp"
+    "$inputs/keywords.capnp" "$inputs/import-user.capnp" "$inputs/advanced.capnp"
   "$capnp" compile -o"$tool:$destination" --src-prefix="$inputs" \
     "$inputs/import-base.capnp"
   "$capnp" compile -o"$tool:$destination" --src-prefix="$stock" \
@@ -35,7 +35,10 @@ generate "$first"
 generate "$second"
 diff -ru "$first" "$second"
 swift format --in-place --configuration "$root/.swift-format" "$first/test.capnp.swift"
+swift format --in-place --configuration "$root/.swift-format" "$first/advanced.capnp.swift"
 diff -u "$root/Tests/Generated/CapnpTest/test.capnp.swift" "$first/test.capnp.swift"
+diff -u "$root/Tests/Generated/CompilerFixtures/advanced.capnp.swift" \
+  "$first/advanced.capnp.swift"
 
 consumer="$work/clean consumer"
 mkdir -p "$consumer/Sources/Generated"

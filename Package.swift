@@ -30,6 +30,11 @@ let package = Package(
             path: "Tests/Generated/CapnpTest"
         ),
         .target(
+            name: "CapnProtoGeneratedFixtures",
+            dependencies: ["CapnProto"],
+            path: "Tests/Generated/CompilerFixtures"
+        ),
+        .target(
             name: "CapnProtoTestSupport",
             dependencies: ["CapnProto"],
             path: "Tests/Support"
@@ -65,7 +70,9 @@ let package = Package(
         .testTarget(name: "CapnProtoNIOTests", dependencies: ["CapnProtoNIO"]),
         .testTarget(
             name: "CapnProtoCompilerTests",
-            dependencies: ["CapnProtoCompiler", "CapnProtoConformance"],
+            dependencies: [
+                "CapnProtoCompiler", "CapnProtoConformance", "CapnProtoGeneratedFixtures",
+            ],
             resources: [.copy("Fixtures")]
         ),
         .testTarget(name: "CapnProtoTestSupportTests", dependencies: ["CapnProtoTestSupport"]),
