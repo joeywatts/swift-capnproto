@@ -1,3 +1,4 @@
+import CapnProtoCompiler
 import CapnProtoSchema
 import Foundation
 
@@ -15,9 +16,15 @@ do {
             + "\(try request.nodes.count) nodes, "
             + files.map { (try? $0.filename) ?? "<invalid>" }.joined(separator: ", ") + "\n"
         FileHandle.standardOutput.write(Data(summary.utf8))
+    } else if CommandLine.arguments.count == 1 {
+        for file in try SwiftGenerator().generate(request) {
+            let url = URL(fileURLWithPath: file.path)
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data(file.contents.utf8).write(to: url)
+        }
     } else {
-        FileHandle.standardError.write(
-            Data("capnpc-swift: code generation is not yet implemented\n".utf8))
+        FileHandle.standardError.write(Data("capnpc-swift: unexpected arguments\n".utf8))
         exit(64)
     }
 } catch {

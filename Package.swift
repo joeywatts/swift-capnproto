@@ -57,7 +57,11 @@ let package = Package(
         ),
         .testTarget(name: "CapnProtoRPCTests", dependencies: ["CapnProtoRPC"]),
         .testTarget(name: "CapnProtoNIOTests", dependencies: ["CapnProtoNIO"]),
-        .testTarget(name: "CapnProtoCompilerTests", dependencies: ["CapnProtoCompiler"]),
+        .testTarget(
+            name: "CapnProtoCompilerTests",
+            dependencies: ["CapnProtoCompiler"],
+            resources: [.copy("Fixtures")]
+        ),
         .testTarget(name: "CapnProtoTestSupportTests", dependencies: ["CapnProtoTestSupport"]),
     ],
     swiftLanguageModes: [.v6]
