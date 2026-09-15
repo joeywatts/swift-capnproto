@@ -129,6 +129,39 @@ private let emptyBrand = SchemaBrand()
     let cap = try other.reader().value(named: "service")
     #expect(cap.capabilityValue == 7)
 
+    let groupSchema = try schemas.requireSchema(id: 105)
+    let groupMessage = try DynamicMessageBuilder(schema: groupSchema, registry: schemas)
+    let groupBuilder = try groupMessage.initRoot()
+    try groupBuilder.set(.bool(true), named: "enabled")
+    try otherBuilder.set(.int32(44), named: "number")
+    try otherBuilder.set(.structure(try groupMessage.reader()), named: "settings")
+    let afterGroup = try other.reader()
+    #expect(try afterGroup.value(named: "number").int32Value == 44)
+    let groupReader = try #require(afterGroup.value(named: "settings").structValue)
+    #expect(try groupReader.value(named: "enabled").boolValue == true)
+
+    let childSource = try otherBuilder.initStruct(named: "child")
+    try childSource.set(.uint32(123), named: "value")
+    let sourceReader = try #require(other.reader().value(named: "child").structValue)
+    try otherBuilder.set(.structure(sourceReader), named: "payload")
+    guard case .anyPointer(let payload) = try other.reader().value(named: "payload") else {
+        Issue.record("payload did not have AnyPointer dynamic type")
+        return
+    }
+    #expect(try payload.asStruct().integer(atByte: 0, as: UInt32.self) == 123)
+
+    let outer = try otherBuilder.initList(named: "nestedChildren", count: 1)
+    let inner = try outer.initList(at: 0, count: 2)
+    try inner.structElement(at: 1).set(.uint32(321), named: "value")
+    guard case .list(let outerReader) = try other.reader().value(named: "nestedChildren"),
+        case .list(let innerReader) = try outerReader.value(at: 0),
+        case .structure(let nestedChild) = try innerReader.value(at: 1)
+    else {
+        Issue.record("nested struct list had the wrong dynamic shape")
+        return
+    }
+    #expect(try nestedChild.value(named: "value").uint32Value == 321)
+
     let unknown = try DynamicEnum(rawValue: 65000, schema: schemas.requireSchema(id: 101))
     #expect(unknown.name == nil)
     #expect(try DynamicDiagnostics.describe(.enumeration(unknown)) == "unknown(65000)")
@@ -205,7 +238,7 @@ private func makeDynamicRegistry() throws -> SchemaRegistry {
         id: 100, displayName: "Dynamic.Root", displayNamePrefixLength: 8,
         nestedNodes: ["Color": 101, "Child": 102],
         kind: .structure(
-            dataWordCount: 4, pointerCount: 5, preferredListEncoding: .inlineComposite,
+            dataWordCount: 4, pointerCount: 7, preferredListEncoding: .inlineComposite,
             isGroup: false, discriminantCount: 0, discriminantOffset: 0,
             fields: [
                 SchemaField(
@@ -244,6 +277,18 @@ private func makeDynamicRegistry() throws -> SchemaRegistry {
                     storage: .slot(
                         offset: 4, type: .interface(id: 104, brand: emptyBrand),
                         defaultValue: .interface)),
+                SchemaField(
+                    name: "settings", codeOrder: 10, storage: .group(typeID: 105)),
+                SchemaField(
+                    name: "payload", codeOrder: 11,
+                    storage: .slot(
+                        offset: 5, type: .anyPointer(.any), defaultValue: .void)),
+                SchemaField(
+                    name: "nestedChildren", codeOrder: 12,
+                    storage: .slot(
+                        offset: 6,
+                        type: .list(.list(.structure(id: 102, brand: emptyBrand))),
+                        defaultValue: .void)),
             ]))
     let union = SchemaNode(
         id: 103, displayName: "Dynamic.Choice", displayNamePrefixLength: 8,
@@ -261,8 +306,19 @@ private func makeDynamicRegistry() throws -> SchemaRegistry {
     let service = SchemaNode(
         id: 104, displayName: "Dynamic.Service", displayNamePrefixLength: 8,
         kind: .interface(methods: [], superclasses: []))
+    let settings = SchemaNode(
+        id: 105, displayName: "Dynamic.Root.settings", displayNamePrefixLength: 13,
+        scopeID: 100,
+        kind: .structure(
+            dataWordCount: 4, pointerCount: 7, preferredListEncoding: .inlineComposite,
+            isGroup: true, discriminantCount: 0, discriminantOffset: 0,
+            fields: [
+                SchemaField(
+                    name: "enabled", codeOrder: 0,
+                    storage: .slot(offset: 200, type: .bool, defaultValue: .bool(false)))
+            ]))
     var loader = SchemaLoader()
-    for node in [root, color, child, union, service] { try loader.load(node) }
+    for node in [root, color, child, union, service, settings] { try loader.load(node) }
     try loader.finish()
     return loader.registry
 }

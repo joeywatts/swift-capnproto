@@ -1,3 +1,5 @@
+import CapnProto
+
 public struct SchemaCompatibility: Equatable, Sendable {
     public var canReadExisting: Bool
     public var canWriteExisting: Bool
@@ -70,9 +72,11 @@ public struct SchemaLoader {
         ):
             let common = min(cf.count, ef.count)
             let shared = (0..<common).allSatisfy { fieldsWireCompatible(cf[$0], ef[$0]) }
-            let unionOK = cdc == edc && (cdc == 0 || cdo == edo)
-            let canRead = shared && unionOK && cd >= ed && cp >= ep && cf.count >= ef.count
-            let canWrite = shared && unionOK && ed >= cd && ep >= cp && ef.count >= cf.count
+            let sharedUnion = (cdc == 0 && edc == 0) || (cdc > 0 && edc > 0 && cdo == edo)
+            let unionRead = sharedUnion && cdc >= edc
+            let unionWrite = sharedUnion && edc >= cdc
+            let canRead = shared && unionRead && cd >= ed && cp >= ep && cf.count >= ef.count
+            let canWrite = shared && unionWrite && ed >= cd && ep >= cp && ef.count >= cf.count
             return .init(
                 canReadExisting: canRead, canWriteExisting: canWrite,
                 isEquivalent: canRead && canWrite)
@@ -110,9 +114,79 @@ public struct SchemaLoader {
 private func fieldsWireCompatible(_ lhs: SchemaField, _ rhs: SchemaField) -> Bool {
     guard lhs.discriminantValue == rhs.discriminantValue else { return false }
     switch (lhs.storage, rhs.storage) {
-    case let (.slot(lo, lt, _), .slot(ro, rt, _)): return lo == ro && lt == rt
+    case let (.slot(lo, lt, ld), .slot(ro, rt, rd)):
+        return lo == ro && typesWireCompatible(lt, rt) && defaultsWireCompatible(ld, rd)
     case let (.group(l), .group(r)): return l == r
     default: return false
+    }
+}
+
+private func typesWireCompatible(_ lhs: SchemaType, _ rhs: SchemaType) -> Bool {
+    if lhs == rhs { return true }
+    switch (lhs, rhs) {
+    case (.list(let old), .list(.structure)), (.list(.structure), .list(let old)):
+        switch old {
+        case .void, .int8, .int16, .int32, .int64, .uint8, .uint16, .uint32, .uint64,
+            .float32, .float64, .text, .data, .list, .enumeration, .structure, .interface,
+            .anyPointer:
+            return true
+        case .bool: return false
+        }
+    default: return false
+    }
+}
+
+private func defaultsWireCompatible(_ lhs: SchemaDefaultValue, _ rhs: SchemaDefaultValue) -> Bool {
+    switch (lhs, rhs) {
+    case (.void, .void), (.interface, .interface): true
+    case let (.bool(l), .bool(r)): l == r
+    case let (.int8(l), .int8(r)): l == r
+    case let (.int16(l), .int16(r)): l == r
+    case let (.int32(l), .int32(r)): l == r
+    case let (.int64(l), .int64(r)): l == r
+    case let (.uint8(l), .uint8(r)): l == r
+    case let (.uint16(l), .uint16(r)): l == r
+    case let (.uint32(l), .uint32(r)): l == r
+    case let (.uint64(l), .uint64(r)): l == r
+    case let (.float32(l), .float32(r)): l.bitPattern == r.bitPattern
+    case let (.float64(l), .float64(r)): l.bitPattern == r.bitPattern
+    case let (.text(l), .text(r)): l == r
+    case let (.data(l), .data(r)): l == r
+    case let (.enumeration(l), .enumeration(r)): l == r
+    case let (.list(l), .list(r)): canonicalDefault(l) == canonicalDefault(r)
+    case let (.structure(l), .structure(r)): canonicalDefault(l) == canonicalDefault(r)
+    case let (.anyPointer(l), .anyPointer(r)): canonicalDefault(l) == canonicalDefault(r)
+    default: false
+    }
+}
+
+private func canonicalDefault(_ value: StructReader) -> [UInt8]? {
+    try? MessageBuilder(firstSegmentWords: 64, allocationStrategy: .growing)
+        .settingRoot(value).framedBytes
+}
+
+private func canonicalDefault(_ value: ListReader) -> [UInt8]? {
+    do {
+        let message = try MessageBuilder(firstSegmentWords: 64, allocationStrategy: .growing)
+        try message.setRoot(copying: value)
+        return try message.framedBytes
+    } catch { return nil }
+}
+
+private func canonicalDefault(_ value: AnyPointerReader) -> [UInt8]? {
+    if value.isNull { return [] }
+    if let capability = try? value.capabilityTableIndex {
+        return [3] + withUnsafeBytes(of: capability.littleEndian, Array.init)
+    }
+    if let structure = try? value.asStruct() { return canonicalDefault(structure) }
+    if let list = try? value.asList() { return canonicalDefault(list) }
+    return nil
+}
+
+private extension MessageBuilder {
+    func settingRoot(_ value: StructReader) throws -> MessageBuilder {
+        _ = try setRoot(copying: value)
+        return self
     }
 }
 

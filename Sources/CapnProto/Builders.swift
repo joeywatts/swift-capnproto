@@ -589,6 +589,12 @@ public struct AnyPointerBuilder {
         try TextBuilder(data: DataBuilder(list: list)).setUTF8(bytes)
     }
 
+    public func setCapability(tableIndex: UInt32) throws {
+        try clear()
+        try arena.setWord(
+            UInt64(3) | UInt64(tableIndex) << 32, segment: segment, index: pointerIndex)
+    }
+
     public func initStruct(dataWords: Int, pointerCount: Int) throws -> StructBuilder {
         try validateStructSize(dataWords: dataWords, pointerCount: pointerCount)
         try clear()
@@ -607,6 +613,15 @@ public struct AnyPointerBuilder {
         return try ListBuilder.initialize(
             arena: arena, pointerSegment: segment, pointerIndex: pointerIndex,
             elementSize: elementSize, count: count)
+    }
+
+    public func initStructList(
+        count: Int, dataWords: Int, pointerCount: Int
+    ) throws -> StructListBuilder {
+        try clear()
+        return try StructListBuilder.initialize(
+            arena: arena, pointerSegment: segment, pointerIndex: pointerIndex, count: count,
+            dataWords: dataWords, pointerCount: pointerCount)
     }
 }
 

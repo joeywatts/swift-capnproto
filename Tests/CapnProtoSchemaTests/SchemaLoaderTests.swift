@@ -29,6 +29,20 @@ import Testing
     #expect(loader.registry.schema(id: 1)?.field(named: "extra") != nil)
     #expect(SchemaLoader.compatibility(of: new, with: old).canReadExisting)
 
+    let changedDefault = SchemaNode(
+        id: 1, displayName: "Record",
+        kind: .structure(
+            dataWordCount: 1, pointerCount: 0, preferredListEncoding: .inlineComposite,
+            isGroup: false, discriminantCount: 0, discriminantOffset: 0,
+            fields: [
+                SchemaField(
+                    name: "value", codeOrder: 0,
+                    storage: .slot(offset: 0, type: .uint64, defaultValue: .uint64(1)))
+            ]))
+    let changedCompatibility = SchemaLoader.compatibility(of: changedDefault, with: old)
+    #expect(!changedCompatibility.canReadExisting)
+    #expect(!changedCompatibility.canWriteExisting)
+
     let invalid = SchemaNode(
         id: 2, displayName: "Invalid",
         kind: .structure(

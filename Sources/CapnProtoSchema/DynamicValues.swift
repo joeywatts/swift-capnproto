@@ -284,11 +284,18 @@ public struct DynamicStructBuilder {
     public func set(_ value: DynamicValue, field: SchemaField) throws {
         if let tag = field.discriminantValue { try selectUnion(tag: tag) }
         switch field.storage {
-        case .group:
+        case .group(let id):
             guard case .structure(let source) = value else {
                 throw dynamicMismatch(expected: "struct", value)
             }
-            try raw.copyContent(from: source.raw)
+            let groupSchema = try registry.requireSchema(id: id)
+            let target = try DynamicStructBuilder(raw, schema: groupSchema, registry: registry)
+            guard case .structure(_, _, _, _, _, _, let fields) = groupSchema.kind else { return }
+            let active = try source.activeUnionField()?.name
+            for childField in fields
+            where childField.discriminantValue == nil || childField.name == active {
+                try target.set(source.value(of: childField), field: childField)
+            }
         case .slot(let offset, let type, let defaultValue):
             try write(value, type: type, offset: Int(offset), defaultValue: defaultValue)
         }
@@ -354,7 +361,14 @@ public struct DynamicStructBuilder {
             count > 0
         else { return }
         for field in fields where field.discriminantValue != nil {
-            guard case .slot(let fieldOffset, let type, _) = field.storage else { continue }
+            try clear(field.storage)
+        }
+        try raw.setDiscriminant(atByte: Int(offset) * 2, to: tag)
+    }
+
+    private func clear(_ storage: SchemaField.Storage) throws {
+        switch storage {
+        case .slot(let fieldOffset, let type, _):
             if type == .bool {
                 try raw.clearData(atBit: Int(fieldOffset))
             } else if let bits = dynamicScalarBitWidth(type), bits > 0 {
@@ -363,8 +377,11 @@ public struct DynamicStructBuilder {
             } else if dynamicIsPointer(type) {
                 try raw.clearPointer(at: Int(fieldOffset))
             }
+        case .group(let id):
+            let group = try registry.requireSchema(id: id)
+            guard case .structure(_, _, _, _, _, _, let fields) = group.kind else { return }
+            for field in fields { try clear(field.storage) }
         }
-        try raw.setDiscriminant(atByte: Int(offset) * 2, to: tag)
     }
 
     private func write(
@@ -409,6 +426,15 @@ public struct DynamicStructBuilder {
         case (.interface, .capability(nil)): try raw.clearPointer(at: offset)
         case (.anyPointer, .anyPointer(let value)):
             try raw.anyPointerField(at: offset).set(value)
+        case (.anyPointer(.any), .structure(let value)),
+            (.anyPointer(.struct), .structure(let value)):
+            try raw.anyPointerField(at: offset).setStruct(value.raw)
+        case (.anyPointer(.any), .list(let value)), (.anyPointer(.list), .list(let value)):
+            try raw.anyPointerField(at: offset).setList(value.raw)
+        case (.anyPointer(.any), .capability(.some(let value))),
+            (.anyPointer(.capability), .capability(.some(let value))):
+            try raw.anyPointerField(at: offset).setCapability(tableIndex: value)
+        case (.anyPointer, .capability(nil)): try raw.anyPointerField(at: offset).clear()
         default: throw dynamicMismatch(expected: String(describing: type), value)
         }
     }
@@ -476,6 +502,18 @@ public struct DynamicListBuilder {
     public func initList(at index: Int, count: Int) throws -> DynamicListBuilder {
         guard case .list(let nested) = elementType, case .plain(let list) = backing else {
             throw SchemaError.kindMismatch(expected: "list of lists", actual: "list")
+        }
+        if case .structure(let id, _) = nested {
+            let child = try registry.requireSchema(id: id)
+            guard case .structure(let data, let pointers, _, _, _, _, _) = child.kind else {
+                throw SchemaError.kindMismatch(expected: "struct", actual: child.kindName)
+            }
+            return DynamicListBuilder(
+                backing: .structures(
+                    try list.initStructList(
+                        at: index, count: count, dataWords: Int(data),
+                        pointerCount: Int(pointers))),
+                elementType: nested, registry: registry)
         }
         return DynamicListBuilder(
             backing: .plain(
