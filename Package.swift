@@ -44,7 +44,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "capnp-benchmark",
-            dependencies: ["CapnProtoTestSupport"],
+            dependencies: ["CapnProto"],
             path: "Benchmarks"
         ),
         .plugin(name: "CapnProtoPlugin", capability: .buildTool()),

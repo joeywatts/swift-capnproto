@@ -417,20 +417,39 @@ public struct ListBuilder {
             pointerCount: pointerCount)
     }
 
-    /// Applies the wire-format primitive-list to struct-list upgrade rule while
-    /// preserving each primitive as field zero of the corresponding struct.
+    /// Applies the wire-format primitive/pointer-list to struct-list upgrade
+    /// rule while preserving each old element as field zero.
     public func upgradeToStructList(dataWords: Int, pointerCount: Int) throws -> StructListBuilder {
-        guard elementSize != .pointer, elementSize != .inlineComposite else {
-            throw CapnProtoError.typeMismatch(expected: "primitive list", actual: "\(elementSize)")
+        guard elementSize != .inlineComposite else {
+            throw CapnProtoError.typeMismatch(
+                expected: "primitive or pointer list", actual: "\(elementSize)")
         }
-        guard dataWords > 0 || elementSize == .void else {
+        guard dataWords > 0 || elementSize == .void || elementSize == .pointer else {
             throw CapnProtoError.typeMismatch(
                 expected: "data-bearing struct", actual: "empty struct")
         }
+        guard pointerCount > 0 || elementSize != .pointer else {
+            throw CapnProtoError.typeMismatch(
+                expected: "pointer-bearing struct", actual: "data-only struct")
+        }
+        let snapshot = ReaderState(segments: arena.outputSegments, options: ReaderOptions())
+        let sourceList = try resolvePointer(
+            state: snapshot, segment: pointerSegment, pointerIndex: pointerIndex
+        ).asList(depth: 0)
         let oldBytes = arena.segments[segment].bytes
         let upgraded = try StructListBuilder.initialize(
             arena: arena, pointerSegment: pointerSegment, pointerIndex: pointerIndex, count: count,
             dataWords: dataWords, pointerCount: pointerCount)
+        if elementSize == .pointer {
+            for index in 0..<count {
+                try copyPointerGraph(
+                    source: .resolved(try sourceList.pointer(at: index)), to: arena,
+                    pointerSegment: upgraded.segment,
+                    pointerIndex: upgraded.elementsStart + index * upgraded.wordsPerElement
+                        + dataWords)
+            }
+            return upgraded
+        }
         if elementSize == .void { return upgraded }
         if elementSize == .bit {
             for index in 0..<count {
@@ -473,6 +492,8 @@ public struct StructListBuilder {
     public let count: Int
     public let dataWordCount: Int
     public let pointerCount: Int
+    let sourcePointerSegment: Int
+    let sourcePointerIndex: Int
 
     var wordsPerElement: Int { dataWordCount + pointerCount }
 
@@ -493,7 +514,8 @@ public struct StructListBuilder {
         return StructListBuilder(
             arena: arena, segment: object.allocation.segmentID,
             elementsStart: object.objectStart + 1, count: count,
-            dataWordCount: dataWords, pointerCount: pointerCount)
+            dataWordCount: dataWords, pointerCount: pointerCount,
+            sourcePointerSegment: pointerSegment, sourcePointerIndex: pointerIndex)
     }
 
     public subscript(index: Int) -> StructBuilder {
@@ -506,6 +528,45 @@ public struct StructListBuilder {
                 arena: arena, segment: segment, dataStart: start, dataWords: dataWordCount,
                 pointerStart: start + dataWordCount, pointerCount: pointerCount)
         }
+    }
+
+    /// Widens every element while preserving existing data and pointer fields.
+    public func upgrade(dataWords: Int, pointerCount: Int) throws -> StructListBuilder {
+        guard dataWords >= dataWordCount, pointerCount >= self.pointerCount else {
+            throw CapnProtoError.typeMismatch(
+                expected: "non-shrinking struct layout",
+                actual: "\(dataWords) data words and \(pointerCount) pointers")
+        }
+        let state = ReaderState(segments: arena.outputSegments, options: ReaderOptions())
+        let source = try resolvePointer(
+            state: state, segment: sourcePointerSegment, pointerIndex: sourcePointerIndex
+        ).asList(depth: 0)
+        let upgraded = try StructListBuilder.initialize(
+            arena: arena, pointerSegment: sourcePointerSegment,
+            pointerIndex: sourcePointerIndex, count: count, dataWords: dataWords,
+            pointerCount: pointerCount)
+        for element in 0..<count {
+            let oldStart =
+                source.startWord
+                + element * (source.dataWordsPerElement + source.pointerWordsPerElement)
+            let newStart = upgraded.elementsStart + element * upgraded.wordsPerElement
+            try arena.withBytes(segment: upgraded.segment) { destination in
+                let oldData = state.segments[source.segment][
+                    (oldStart * 8)..<((oldStart + dataWordCount) * 8)]
+                destination.replaceSubrange(
+                    (newStart * 8)..<((newStart + dataWordCount) * 8), with: oldData)
+            }
+            for pointer in 0..<self.pointerCount {
+                try copyPointerGraph(
+                    source: .resolved(
+                        try resolvePointer(
+                            state: state, segment: source.segment,
+                            pointerIndex: oldStart + source.dataWordsPerElement + pointer)),
+                    to: arena, pointerSegment: upgraded.segment,
+                    pointerIndex: newStart + dataWords + pointer)
+            }
+        }
+        return upgraded
     }
 }
 

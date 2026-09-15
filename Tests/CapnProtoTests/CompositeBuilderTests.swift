@@ -45,6 +45,32 @@ import Testing
     #expect(try list.structElement(at: 1).textField(at: 0).string == "upgraded")
 }
 
+@Test func pointerAndCompositeListUpgradesPreserveValues() throws {
+    let message = try MessageBuilder(firstSegmentWords: 64)
+    let root = try message.initRootStruct(dataWords: 0, pointerCount: 2)
+    let pointers = try root.initListField(at: 0, elementSize: .pointer, count: 2)
+    _ = try pointers.initStruct(at: 0, dataWords: 1, pointerCount: 0)
+    let second = try pointers.initStruct(at: 1, dataWords: 1, pointerCount: 0)
+    try second.setInteger(atByte: 0, to: UInt64(99))
+    let pointerUpgrade = try pointers.upgradeToStructList(dataWords: 0, pointerCount: 1)
+    #expect(try pointerUpgrade[1].pointerCount == 1)
+
+    let structs = try root.initStructListField(at: 1, count: 2, dataWords: 1, pointerCount: 1)
+    try structs[0].setInteger(atByte: 0, to: UInt64(55))
+    _ = try structs[0].setTextField(at: 0, to: "kept")
+    let widened = try structs.upgrade(dataWords: 2, pointerCount: 2)
+    try widened[1].setInteger(atByte: 8, to: UInt64(77))
+
+    let read = try message.asReader().rootStruct()
+    #expect(
+        try read.listField(at: 0).structElement(at: 1).structField(at: 0)
+            .integer(atByte: 0, as: UInt64.self) == 99)
+    let widenedRead = try read.listField(at: 1)
+    #expect(try widenedRead.structElement(at: 0).integer(atByte: 0, as: UInt64.self) == 55)
+    #expect(try widenedRead.structElement(at: 0).textField(at: 0).string == "kept")
+    #expect(try widenedRead.structElement(at: 1).integer(atByte: 8, as: UInt64.self) == 77)
+}
+
 // Layout-sensitive inline-composite vector matching the wire layout asserted by
 // encoding-test.c++'s UnionLayout/SmallStructLists coverage.
 @Test func inlineCompositeLayoutIsByteExact() throws {

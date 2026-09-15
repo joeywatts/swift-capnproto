@@ -1,10 +1,14 @@
-import CapnProtoTestSupport
+import CapnProto
 import Foundation
 
 let iterations =
     Int(ProcessInfo.processInfo.environment["CAPNP_BENCHMARK_ITERATIONS"] ?? "10000") ?? 10_000
-let sample = Array(repeating: UInt8(0), count: 256)
-let packedSample: [UInt8] = [0, 31]
+let benchmarkMessage = try MessageBuilder(firstSegmentWords: 64)
+let benchmarkRoot = try benchmarkMessage.initRootStruct(dataWords: 1, pointerCount: 1)
+try benchmarkRoot.setInteger(atByte: 0, to: UInt64(42))
+_ = try benchmarkRoot.setDataField(at: 0, to: [UInt8](repeating: 7, count: 256))
+let sample = try benchmarkMessage.framedBytes
+let packedSample = try benchmarkMessage.packedFramedBytes
 let clock = ContinuousClock()
 
 func report(_ name: String, _ body: () -> UInt64) {
@@ -20,7 +24,8 @@ func report(_ name: String, _ body: () -> UInt64) {
 report("decode") {
     var checksum: UInt64 = 0
     for _ in 0..<iterations {
-        checksum &+= MessageFuzzTarget.consume(sample) == .accepted ? 1 : 0
+        let frame = try! MessageFraming.decodePrefix(sample)
+        checksum &+= try! frame.reader().rootStruct().integer(atByte: 0, as: UInt64.self)
     }
     return checksum
 }
@@ -28,7 +33,8 @@ report("decode") {
 report("traversal") {
     var checksum: UInt64 = 0
     for _ in 0..<iterations {
-        for byte in sample { checksum &+= UInt64(byte) }
+        let root = try! benchmarkMessage.asReader().rootStruct()
+        checksum &+= try! root.dataField(at: 0).bytes.reduce(UInt64(0)) { $0 + UInt64($1) }
     }
     return checksum
 }
@@ -36,8 +42,11 @@ report("traversal") {
 report("build") {
     var checksum: UInt64 = 0
     for index in 0..<iterations {
-        let bytes = [UInt8](repeating: UInt8(truncatingIfNeeded: index), count: 256)
-        checksum &+= UInt64(bytes.count)
+        let message = try! MessageBuilder(firstSegmentWords: 64)
+        let root = try! message.initRootStruct(dataWords: 1, pointerCount: 1)
+        try! root.setInteger(atByte: 0, to: UInt64(index))
+        _ = try! root.setDataField(at: 0, to: [UInt8](repeating: 7, count: 256))
+        checksum &+= UInt64(message.segments.reduce(0) { $0 + $1.count })
     }
     return checksum
 }
@@ -45,7 +54,7 @@ report("build") {
 report("serialize") {
     var checksum: UInt64 = 0
     for _ in 0..<iterations {
-        let output = sample.withUnsafeBytes { Array($0) }
+        let output = try! benchmarkMessage.framedBytes
         checksum &+= UInt64(output.count)
     }
     return checksum
@@ -54,7 +63,7 @@ report("serialize") {
 report("packed-io") {
     var checksum: UInt64 = 0
     for _ in 0..<iterations {
-        checksum &+= PackedFuzzTarget.consume(packedSample) == .accepted ? 1 : 0
+        checksum &+= UInt64(try! PackedEncoding.unpack(packedSample).count)
     }
     return checksum
 }
