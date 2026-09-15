@@ -185,12 +185,34 @@ private actor ByteMailbox {
     var pendingOperationCount: Int { senders.count + receivers.count }
 }
 
+private actor TransportWriteLock {
+    private var held = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func acquire() async {
+        if !held {
+            held = true
+            return
+        }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func release() {
+        if waiters.isEmpty {
+            held = false
+        } else {
+            waiters.removeFirst().resume()
+        }
+    }
+}
+
 public final class InMemoryRPCTransport: RPCMessageTransport, @unchecked Sendable {
     private let endpoint: Int
     private let inbound: ByteMailbox
     private let outbound: ByteMailbox
     private let configuration: InMemoryTransportConfiguration
     private let trace: TransportTrace?
+    private let writeLock = TransportWriteLock()
     private let lock = NSLock()
     private var sendOperation = 0
     private var receiveOperation = 0
@@ -224,6 +246,17 @@ public final class InMemoryRPCTransport: RPCMessageTransport, @unchecked Sendabl
     }
 
     public func send(_ bytes: [UInt8]) async throws {
+        await writeLock.acquire()
+        do {
+            try await sendUnlocked(bytes)
+            await writeLock.release()
+        } catch {
+            await writeLock.release()
+            throw error
+        }
+    }
+
+    private func sendUnlocked(_ bytes: [UInt8]) async throws {
         let operation = lock.withLock { () -> Int in
             let result = sendOperation
             sendOperation += 1

@@ -16,6 +16,9 @@ private func wireValue(_ value: UInt32) throws -> StructReader {
 }
 
 private final class WireService: CapabilityCallTarget, @unchecked Sendable {
+    private let lock = NSLock()
+    private var receivedValues: [UInt32] = []
+
     func supports(interfaceID: UInt64) -> Bool { interfaceID == wireMethod.interfaceID }
 
     func call(_ method: CapabilityMethodDescriptor, params: StructReader) async throws
@@ -26,8 +29,38 @@ private final class WireService: CapabilityCallTarget, @unchecked Sendable {
             throw CapabilityError.unknownMethod(
                 interfaceID: method.interfaceID, methodID: method.methodID)
         }
-        return try wireValue(try params.integer(atByte: 0, as: UInt32.self) + 1)
+        let value = try params.integer(atByte: 0, as: UInt32.self)
+        lock.withLock { receivedValues.append(value) }
+        return try wireValue(value + 1)
     }
+
+    var values: [UInt32] { lock.withLock { receivedValues } }
+}
+
+// Adapts Rpc.Pipelining, Rpc.PromiseResolve, and call-order cases from
+// rpc-test.c++ at the pinned upstream commit above.
+@Test func promisedAnswerCallsAreSentBeforeBootstrapResolutionAndStayOrdered() async throws {
+    let service = WireService()
+    let (a, b) = InMemoryRPCTransport.makePair(configuration: .init(fragmentSize: 1))
+    let client = TwoPartyRPCConnection(side: .client, transport: a)
+    let server = TwoPartyRPCConnection(
+        side: .server, transport: b, bootstrap: CapabilityClient(target: service))
+    await client.start()
+    await server.start()
+
+    let bootstrap = try await client.beginBootstrap()
+    let pipeline = bootstrap.pipeline()
+    let first = Task { try await pipeline.call(wireMethod, params: wireValue(10)) }
+    while (await client.snapshot).questions < 2 { await Task.yield() }
+    let second = Task { try await pipeline.call(wireMethod, params: wireValue(20)) }
+    while (await client.snapshot).questions < 3 { await Task.yield() }
+    let remote = try await bootstrap.response()
+    _ = remote
+    #expect(try await first.value.integer(atByte: 0, as: UInt32.self) == 11)
+    #expect(try await second.value.integer(atByte: 0, as: UInt32.self) == 21)
+    #expect(service.values == [10, 20])
+    await client.close()
+    await server.close()
 }
 
 // Adapts Rpc.Bootstrap, Rpc.Basic, Rpc.Exception, Rpc.Finish, and Rpc.Release
