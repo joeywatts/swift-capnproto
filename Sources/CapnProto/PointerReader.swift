@@ -133,7 +133,9 @@ func resolvePointer(state: ReaderState, segment: Int, pointerIndex: Int) throws 
         throw CapnProtoError.invalidFarPointer
     }
     if !isDoubleFar {
-        try state.requireRange(segment: targetSegment, start: landing, words: 1)
+        guard landing < state.segments[targetSegment].count / 8 else {
+            throw CapnProtoError.invalidFarPointer
+        }
         let landingRaw = try state.word(segment: targetSegment, index: landing)
         guard landingRaw & 3 != 2 else { throw CapnProtoError.invalidFarPointer }
         return ResolvedPointer(
@@ -142,7 +144,9 @@ func resolvePointer(state: ReaderState, segment: Int, pointerIndex: Int) throws 
         )
     }
 
-    try state.requireRange(segment: targetSegment, start: landing, words: 2)
+    guard landing < state.segments[targetSegment].count / 8 - 1 else {
+        throw CapnProtoError.invalidFarPointer
+    }
     let objectFar = try state.word(segment: targetSegment, index: landing)
     let tag = try state.word(segment: targetSegment, index: landing + 1)
     guard objectFar & 7 == 2, tag & 3 != 2, ((tag >> 2) & 0x3fff_ffff) == 0 else {
