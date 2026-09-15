@@ -10,8 +10,9 @@ source Tests/Upstream/BASELINES
 [[ "$CAPNPROTO_REV" =~ ^[0-9a-f]{40}$ ]]
 [[ "$CAPNP_TEST_REV" =~ ^[0-9a-f]{40}$ ]]
 [[ "$CAPNP_TEST_REV" == 9aad1331857d2b02158cffdba4d664f71f7f81de ]]
-rg -q "CAPNP_TEST_UPSTREAM_REV = \"$CAPNP_TEST_REV\"" flake.nix
-rg -q "$CAPNPROTO_REV" Documentation/Compatibility.md THIRD_PARTY_NOTICES.md
+grep -Fq "CAPNP_TEST_UPSTREAM_REV = \"$CAPNP_TEST_REV\"" flake.nix
+grep -Fq "$CAPNPROTO_REV" Documentation/Compatibility.md
+grep -Fq "$CAPNPROTO_REV" THIRD_PARTY_NOTICES.md
 
 shasum -a 256 -c Tests/Upstream/capnproto.sha256
 
@@ -27,7 +28,7 @@ while IFS=$'\t' read -r feature sources; do
       echo "traceability source is not imported: $path" >&2
       exit 1
     }
-    rg -F -q "  Tests/Upstream/capnproto/$path" Tests/Upstream/capnproto.sha256 || {
+    grep -Fq "  Tests/Upstream/capnproto/$path" Tests/Upstream/capnproto.sha256 || {
       echo "traceability source is not checksummed: $path" >&2
       exit 1
     }

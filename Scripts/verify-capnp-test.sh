@@ -29,12 +29,12 @@ make -s -C "$suite" expect/simpleTest.txt expect/simpleTest.bin
 )
 
 report="$(make -s -C "$suite" CAPNP_TEST_APP="$bin_path" 2>&1)"
-skip_count="$(printf '%s\n' "$report" | rg -c '^\.\. SKIP')"
+skip_count="$(printf '%s\n' "$report" | grep -cE '^\.\. SKIP')"
 [[ "$skip_count" == 8 ]] || {
   printf '%s\n' "$report" >&2
   echo "expected eight intentional skips, got $skip_count" >&2
   exit 1
 }
-printf '%s\n' "$report" | rg -q '0/0 tests passsed \(8 skipped\)'
+printf '%s\n' "$report" | grep -qE '0/0 tests passsed \(8 skipped\)'
 echo "capnp_test discovered four cases and eight intentional skips"
 echo "known-good and corruption adapters verified in both directions"
