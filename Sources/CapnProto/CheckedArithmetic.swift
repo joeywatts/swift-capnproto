@@ -14,6 +14,9 @@ public enum CapnProtoError: Error, Equatable, CustomStringConvertible {
     case invalidText
     case orphanArenaMismatch
     case orphanAlreadyAdopted
+    case invalidFrame
+    case incompleteFrame
+    case frameTooLarge
 
     public var description: String {
         switch self {
@@ -33,6 +36,9 @@ public enum CapnProtoError: Error, Equatable, CustomStringConvertible {
         case .invalidText: "text is not NUL-terminated"
         case .orphanArenaMismatch: "orphan belongs to a different message arena"
         case .orphanAlreadyAdopted: "orphan has already been adopted"
+        case .invalidFrame: "invalid stream frame"
+        case .incompleteFrame: "incomplete stream frame"
+        case .frameTooLarge: "stream frame exceeds configured limits"
         }
     }
 }
