@@ -40,7 +40,8 @@ public enum RPCWireValidator {
     ) throws -> Message.Reader {
         do {
             let frame = try MessageFraming.decodePrefix(
-                bytes, options: FramingOptions(maximumSegments: 64, maximumTotalWords: maximumWords))
+                bytes, options: FramingOptions(maximumSegments: 64, maximumTotalWords: maximumWords)
+            )
             guard frame.byteCount == bytes.count else {
                 throw RPCProtocolError.malformedMessage("trailing bytes")
             }
@@ -73,7 +74,8 @@ public enum RPCWireValidator {
             try validatePayload(try call.params, state: next)
             switch try call.sendResultsTo.which {
             case .caller, .yourself: break
-            case .thirdParty: throw RPCProtocolError.unsupportedMessageVariant("third-party results")
+            case .thirdParty:
+                throw RPCProtocolError.unsupportedMessageVariant("third-party results")
             case .unknown(let tag): throw RPCProtocolError.unknownMessageVariant(tag)
             }
             try beginInboundQuestion(try call.questionId, state: &next)

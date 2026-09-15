@@ -44,5 +44,11 @@ dispatchers, including inherited and streaming methods. Promise capabilities,
 ordered local pipelining, cancellation, and exact-once capability-table lifetime
 accounting are implemented. A bounded in-memory duplex byte transport provides
 deterministic fragmentation, coalescing, tracing, backpressure, EOF, and injected
-faults for RPC state-machine tests. RPC wire messages and production networking
-remain scheduled for Milestone 6.
+faults for RPC state-machine tests. Generated `rpc.capnp` and
+`rpc-twoparty.capnp` bindings drive a validated Level 3 two-party state machine
+covering bootstrap, calls/returns, capability imports and exports, promise
+pipelining and resolution, cancellation, tail returns, streaming flow control,
+and disembargo ordering barriers. The SwiftNIO adapter supports TCP and Unix
+sockets, partial reads, serialized writes, backpressure, half-close, and clean
+shutdown. The live release matrix is tested against the pinned C++ implementation;
+see `Documentation/RPCConformance.md`.

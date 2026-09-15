@@ -17,6 +17,7 @@ let package = Package(
         .executable(name: "capnp-swift", targets: ["capnp-swift"]),
         .executable(name: "capnp-test-swift", targets: ["capnp-test-swift"]),
         .executable(name: "capnp-rpc-interop-swift", targets: ["capnp-rpc-interop-swift"]),
+        .executable(name: "capnp-rpc-soak", targets: ["capnp-rpc-soak"]),
         .plugin(name: "CapnProtoPlugin", targets: ["CapnProtoPlugin"]),
     ],
     dependencies: [
@@ -56,6 +57,8 @@ let package = Package(
         .executableTarget(
             name: "capnp-rpc-interop-swift",
             dependencies: ["CapnProto", "CapnProtoRPC", "CapnProtoNIO"]),
+        .executableTarget(
+            name: "capnp-rpc-soak", dependencies: ["CapnProto", "CapnProtoRPC"]),
         .executableTarget(
             name: "capnp-fuzz-message",
             dependencies: ["CapnProtoTestSupport"],

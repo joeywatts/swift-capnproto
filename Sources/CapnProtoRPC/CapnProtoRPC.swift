@@ -69,6 +69,25 @@ public protocol CapabilityCallTarget: AnyObject {
     func supports(interfaceID: UInt64) -> Bool
 }
 
+public struct CapabilityCallResult: @unchecked Sendable {
+    public let results: StructReader
+    public let capabilities: [CapabilityClient]
+
+    public init(results: StructReader, capabilities: [CapabilityClient] = []) {
+        self.results = results
+        self.capabilities = capabilities
+    }
+}
+
+/// Optional extension implemented by wire targets and services that exchange
+/// capability-table entries alongside their content struct.
+public protocol CapabilityCallTargetWithCaps: CapabilityCallTarget {
+    func call(
+        _ method: CapabilityMethodDescriptor, params: StructReader,
+        capabilities: [CapabilityClient]
+    ) async throws -> CapabilityCallResult
+}
+
 extension CapabilityCallTarget {
     public func supports(interfaceID: UInt64) -> Bool { true }
 }
@@ -132,6 +151,7 @@ public final class LocalCapabilityTarget: CapabilityCallTarget, @unchecked Senda
         if Task.isCancelled { throw CapabilityError.cancelled }
         return try await handler(CapabilityRequestContext(method: method, params: params))
     }
+
 }
 
 public struct CapabilityClient: @unchecked Sendable {
@@ -175,6 +195,17 @@ public struct CapabilityClient: @unchecked Sendable {
         } catch is CancellationError {
             throw CapabilityError.cancelled
         }
+    }
+
+    public func call(
+        _ method: CapabilityMethodDescriptor, params: StructReader,
+        capabilities: [CapabilityClient]
+    ) async throws -> CapabilityCallResult {
+        if let target = target as? any CapabilityCallTargetWithCaps {
+            return try await target.call(method, params: params, capabilities: capabilities)
+        }
+        guard capabilities.isEmpty else { throw CapabilityError.unserializableCapability }
+        return CapabilityCallResult(results: try await call(method, params: params))
     }
 
 }

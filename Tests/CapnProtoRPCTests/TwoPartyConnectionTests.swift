@@ -82,9 +82,12 @@ private final class WireService: CapabilityCallTarget, @unchecked Sendable {
     let unknown = CapabilityMethodDescriptor(
         interfaceID: wireMethod.interfaceID, methodID: 99, name: "missing",
         paramStructID: 0, resultStructID: 0, isStreaming: false)
-    await #expect(throws: CapabilityError.broken(RemoteException(
-        kind: .failed,
-        reason: "unknownMethod(interfaceID: 65261, methodID: 99)"))) {
+    await #expect(
+        throws: CapabilityError.broken(
+            RemoteException(
+                kind: .failed,
+                reason: "unknownMethod(interfaceID: 65261, methodID: 99)"))
+    ) {
         _ = try await remote!.call(unknown, params: wireValue(0))
     }
 
@@ -146,6 +149,47 @@ private actor StreamingProbe: CapabilityCallTarget {
         active -= 1
         return params
     }
+}
+
+private final class CapabilityPassingService: CapabilityCallTargetWithCaps, @unchecked Sendable {
+    func call(_ method: CapabilityMethodDescriptor, params: StructReader) async throws
+        -> StructReader
+    {
+        throw CapabilityError.unserializableCapability
+    }
+
+    func call(
+        _ method: CapabilityMethodDescriptor, params: StructReader,
+        capabilities: [CapabilityClient]
+    ) async throws -> CapabilityCallResult {
+        let callback = try #require(capabilities.first)
+        let callbackResult = try await callback.call(wireMethod, params: params)
+        return CapabilityCallResult(results: callbackResult, capabilities: [callback])
+    }
+}
+
+// Adapts Rpc.SendCap and Rpc.ReturnCap from rpc-test.c++ at the pinned upstream
+// commit, exercising parameter and result cap-table adoption in both directions.
+@Test func capabilitiesPassInParametersAndResults() async throws {
+    let callback = WireService()
+    let (a, b) = InMemoryRPCTransport.makePair(configuration: .init(fragmentSize: 5))
+    let client = TwoPartyRPCConnection(side: .client, transport: a)
+    let server = TwoPartyRPCConnection(
+        side: .server, transport: b,
+        bootstrap: CapabilityClient(target: CapabilityPassingService()))
+    await client.start()
+    await server.start()
+    let remote = try await client.bootstrap()
+    let response = try await remote.call(
+        wireMethod, params: wireValue(5),
+        capabilities: [CapabilityClient(target: callback)])
+    #expect(try response.results.integer(atByte: 0, as: UInt32.self) == 6)
+    let returned = try #require(response.capabilities.first)
+    let second = try await returned.call(wireMethod, params: wireValue(8))
+    #expect(try second.integer(atByte: 0, as: UInt32.self) == 9)
+    #expect(callback.values == [5, 8])
+    await client.close()
+    await server.close()
 }
 
 // Adapts Rpc.Streaming and its flow-control ordering cases from rpc-test.c++ at

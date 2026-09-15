@@ -5,7 +5,7 @@
 code generation, reflection, and capability-based RPC.
 
 The project has completed the checked wire-format, serialization, typed
-code-generation, reflection, and local-capability milestones. It generates Swift
+code-generation, reflection, and two-party RPC milestones. It generates Swift
 readers, builders, enums, defaults, unions, groups, generic pointer adapters, and
 capability clients, servers, dispatchers, and pipeline views; the opt-in SwiftPM
 plugin integrates `.capnp` files into consumer targets. Readers enforce nesting
@@ -55,6 +55,8 @@ Scripts/check-package-boundaries.sh
 Scripts/verify-swift-codegen.sh
 Scripts/verify-swiftpm-plugin.sh
 Scripts/verify-fuzz-targets.sh
+Scripts/verify-rpc-interop.sh
+RPC_SOAK_SECONDS=60 Scripts/run-rpc-soak.sh
 Scripts/run-benchmarks.sh
 ```
 

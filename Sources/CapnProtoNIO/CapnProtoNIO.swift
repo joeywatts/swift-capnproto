@@ -14,7 +14,11 @@ private actor NIOInboundMailbox {
 
     func offer(_ bytes: [UInt8]) {
         guard terminal == nil else { return }
-        if waiters.isEmpty { chunks.append(bytes) } else { waiters.removeFirst().resume(returning: bytes) }
+        if waiters.isEmpty {
+            chunks.append(bytes)
+        } else {
+            waiters.removeFirst().resume(returning: bytes)
+        }
     }
 
     func next() async throws -> [UInt8]? {
@@ -75,7 +79,10 @@ public final class NIORPCTransport: RPCMessageTransport, @unchecked Sendable {
     private let mailbox: NIOInboundMailbox
     private let ownedGroup: MultiThreadedEventLoopGroup?
 
-    private init(channel: any Channel, mailbox: NIOInboundMailbox, ownedGroup: MultiThreadedEventLoopGroup? = nil) {
+    private init(
+        channel: any Channel, mailbox: NIOInboundMailbox,
+        ownedGroup: MultiThreadedEventLoopGroup? = nil
+    ) {
         self.channel = channel
         self.mailbox = mailbox
         self.ownedGroup = ownedGroup
@@ -87,7 +94,9 @@ public final class NIORPCTransport: RPCMessageTransport, @unchecked Sendable {
         do {
             let channel = try await ClientBootstrap(group: group)
                 .channelOption(ChannelOptions.allowRemoteHalfClosure, value: true)
-                .channelInitializer { channel in channel.pipeline.addHandler(NIOInboundHandler(mailbox: mailbox)) }
+                .channelInitializer { channel in
+                    channel.pipeline.addHandler(NIOInboundHandler(mailbox: mailbox))
+                }
                 .connect(host: host, port: port).get()
             return NIORPCTransport(channel: channel, mailbox: mailbox, ownedGroup: group)
         } catch {
@@ -102,7 +111,9 @@ public final class NIORPCTransport: RPCMessageTransport, @unchecked Sendable {
         do {
             let channel = try await ClientBootstrap(group: group)
                 .channelOption(ChannelOptions.allowRemoteHalfClosure, value: true)
-                .channelInitializer { channel in channel.pipeline.addHandler(NIOInboundHandler(mailbox: mailbox)) }
+                .channelInitializer { channel in
+                    channel.pipeline.addHandler(NIOInboundHandler(mailbox: mailbox))
+                }
                 .connect(unixDomainSocketPath: path).get()
             return NIORPCTransport(channel: channel, mailbox: mailbox, ownedGroup: group)
         } catch {
@@ -125,7 +136,9 @@ public final class NIORPCTransport: RPCMessageTransport, @unchecked Sendable {
         if let ownedGroup { try? await shutdown(ownedGroup) }
     }
 
-    fileprivate static func accepted(channel: any Channel, mailbox: NIOInboundMailbox) -> NIORPCTransport {
+    fileprivate static func accepted(channel: any Channel, mailbox: NIOInboundMailbox)
+        -> NIORPCTransport
+    {
         NIORPCTransport(channel: channel, mailbox: mailbox)
     }
 }
@@ -142,7 +155,9 @@ public final class NIORPCListener: @unchecked Sendable {
 
     public var localAddress: SocketAddress? { channel.localAddress }
 
-    public static func bind(host: String, port: Int, onAccept: @escaping @Sendable (NIORPCTransport) async -> Void) async throws -> NIORPCListener {
+    public static func bind(
+        host: String, port: Int, onAccept: @escaping @Sendable (NIORPCTransport) async -> Void
+    ) async throws -> NIORPCListener {
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         do {
             let channel = try await ServerBootstrap(group: group)
@@ -162,7 +177,10 @@ public final class NIORPCListener: @unchecked Sendable {
         }
     }
 
-    public static func bind(unixDomainSocketPath path: String, onAccept: @escaping @Sendable (NIORPCTransport) async -> Void) async throws -> NIORPCListener {
+    public static func bind(
+        unixDomainSocketPath path: String,
+        onAccept: @escaping @Sendable (NIORPCTransport) async -> Void
+    ) async throws -> NIORPCListener {
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         do {
             let channel = try await ServerBootstrap(group: group)

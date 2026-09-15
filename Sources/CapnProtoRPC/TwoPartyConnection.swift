@@ -44,7 +44,7 @@ private extension Optional {
     }
 }
 
-private final class RemoteCapabilityTarget: CapabilityCallTarget, @unchecked Sendable {
+private final class RemoteCapabilityTarget: CapabilityCallTargetWithCaps, @unchecked Sendable {
     let importID: UInt32
     weak var connection: TwoPartyRPCConnection?
 
@@ -58,6 +58,16 @@ private final class RemoteCapabilityTarget: CapabilityCallTarget, @unchecked Sen
     {
         guard let connection else { throw RPCConnectionError.disconnected }
         return try await connection.call(importID: importID, method: method, params: params)
+    }
+
+    func call(
+        _ method: CapabilityMethodDescriptor, params: StructReader,
+        capabilities: [CapabilityClient]
+    ) async throws -> CapabilityCallResult {
+        guard let connection else { throw RPCConnectionError.disconnected }
+        return try await connection.callPayload(
+            importID: importID, method: method, params: params,
+            capabilities: capabilities)
     }
 
     deinit {
@@ -215,8 +225,21 @@ public actor TwoPartyRPCConnection {
         guard importReferences[importID] != nil else {
             throw RPCProtocolError.unknownCapability(importID)
         }
+        return try await callPayload(
+            importID: importID, method: method, params: params, capabilities: []
+        ).results
+    }
+
+    public func callPayload(
+        importID: UInt32, method: CapabilityMethodDescriptor, params: StructReader,
+        capabilities: [CapabilityClient]
+    ) async throws -> CapabilityCallResult {
+        guard importReferences[importID] != nil else {
+            throw RPCProtocolError.unknownCapability(importID)
+        }
         return try await performCall(
-            target: .imported(importID), method: method, params: params)
+            target: .imported(importID), method: method, params: params,
+            capabilities: capabilities)
     }
 
     /// Returns a capability that addresses a capability in an unanswered call.
@@ -265,12 +288,14 @@ public actor TwoPartyRPCConnection {
         }
         return try await performCall(
             target: .promised(questionID: questionID, pointerFields: pointerFields),
-            method: method, params: params)
+            method: method, params: params, capabilities: []
+        ).results
     }
 
     private func performCall(
-        target: WireCallTarget, method: CapabilityMethodDescriptor, params: StructReader
-    ) async throws -> StructReader {
+        target: WireCallTarget, method: CapabilityMethodDescriptor, params: StructReader,
+        capabilities: [CapabilityClient]
+    ) async throws -> CapabilityCallResult {
         let id = try allocateQuestion()
         let waiter = PendingWireQuestion()
         pending[id] = waiter
@@ -289,7 +314,8 @@ public actor TwoPartyRPCConnection {
                     if !pointerFields.isEmpty {
                         let transform = try promised.initTransform(count: pointerFields.count)
                         for (index, field) in pointerFields.enumerated() {
-                            try PromisedAnswer.Op.Builder(transform[index]).setGetPointerField(field)
+                            try PromisedAnswer.Op.Builder(transform[index]).setGetPointerField(
+                                field)
                         }
                     }
                 }
@@ -297,6 +323,13 @@ public actor TwoPartyRPCConnection {
                 try call.setMethodId(method.methodID)
                 let payload = try call.initParams()
                 try payload.content.setStruct(params)
+                if !capabilities.isEmpty {
+                    let table = try payload.initCapTable(count: capabilities.count)
+                    for (index, capability) in capabilities.enumerated() {
+                        let exportID = try export(capability)
+                        try CapDescriptor.Builder(table[index]).setSenderHosted(exportID)
+                    }
+                }
             }
             let bytes = try await withTaskCancellationHandler {
                 try await waiter.wait()
@@ -309,7 +342,10 @@ public actor TwoPartyRPCConnection {
                 throw RPCProtocolError.malformedMessage("expected return")
             }
             switch try result.which {
-            case .results(let payload): return try payload.content.asStruct()
+            case .results(let payload):
+                let capabilities = try payload.capTable.map { try importCapability($0) }
+                return CapabilityCallResult(
+                    results: try payload.content.asStruct(), capabilities: capabilities)
             case .exception(let exception):
                 throw CapabilityError.broken(try remoteException(exception))
             case .canceled: throw CapabilityError.cancelled
@@ -327,7 +363,9 @@ public actor TwoPartyRPCConnection {
                 guard case .return(let otherReturn) = try otherMessage.which,
                     case .results(let payload) = try otherReturn.which
                 else { throw RPCProtocolError.malformedMessage("invalid tail return") }
-                return try payload.content.asStruct()
+                return CapabilityCallResult(
+                    results: try payload.content.asStruct(),
+                    capabilities: try payload.capTable.map { try importCapability($0) })
             case .resultsSentElsewhere:
                 throw RPCProtocolError.malformedMessage("results sent elsewhere")
             case .acceptFromThirdParty:
@@ -424,13 +462,25 @@ public actor TwoPartyRPCConnection {
                 interfaceID: try call.interfaceId, methodID: try call.methodId,
                 name: "wire", paramStructID: 0, resultStructID: 0,
                 isStreaming: false)
-            let params = try call.params.content.asStruct()
+            let wirePayload = try call.params
+            let params = try wirePayload.content.asStruct()
+            let parameterCapabilities = try wirePayload.capTable.map { try importCapability($0) }
             let preceding = streamingTail
             let task = Task { [weak self] in
                 await preceding?.value
                 do {
-                    let value = try await target.call(method, params: params)
-                    try await self?.sendResults(answerID: id, value: value)
+                    let result: CapabilityCallResult
+                    if let target = target.target as? any CapabilityCallTargetWithCaps {
+                        result = try await target.call(
+                            method, params: params, capabilities: parameterCapabilities)
+                    } else {
+                        guard parameterCapabilities.isEmpty else {
+                            throw CapabilityError.unserializableCapability
+                        }
+                        result = CapabilityCallResult(
+                            results: try await target.call(method, params: params))
+                    }
+                    try await self?.sendResults(answerID: id, value: result)
                 } catch let tail as RPCTailCall {
                     try? await self?.sendTailReturn(answerID: id, from: tail.questionID)
                 } catch {
@@ -579,12 +629,18 @@ public actor TwoPartyRPCConnection {
         }
     }
 
-    private func sendResults(answerID: UInt32, value: StructReader) async throws {
+    private func sendResults(answerID: UInt32, value: CapabilityCallResult) async throws {
         try await sendMessage { root in
             let result = try root.initReturn()
             try result.setAnswerId(answerID)
             let payload = try result.initResults()
-            try payload.content.setStruct(value)
+            try payload.content.setStruct(value.results)
+            if !value.capabilities.isEmpty {
+                let table = try payload.initCapTable(count: value.capabilities.count)
+                for (index, capability) in value.capabilities.enumerated() {
+                    try CapDescriptor.Builder(table[index]).setSenderHosted(export(capability))
+                }
+            }
         }
     }
 
@@ -688,7 +744,8 @@ public actor TwoPartyRPCConnection {
     }
 
     private func remoteException(_ value: Exception.Reader) throws -> RemoteException {
-        let kind = RemoteException.Kind(rawValue: UInt8(truncatingIfNeeded: try value.type.rawValue))
+        let kind =
+            RemoteException.Kind(rawValue: UInt8(truncatingIfNeeded: try value.type.rawValue))
             ?? .failed
         return RemoteException(kind: kind, reason: try value.reason)
     }
