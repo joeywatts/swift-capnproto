@@ -186,6 +186,9 @@ public enum Schema {
         public var nestedNodes: [NestedNode] {
             get throws { try structList(value.listField(at: 1), NestedNode.init) }
         }
+        public var annotations: [Annotation] {
+            get throws { try structList(value.listField(at: 2), Annotation.init) }
+        }
         public var parameters: [Parameter] {
             get throws { try structList(value.listField(at: 5), Parameter.init) }
         }
@@ -246,6 +249,9 @@ public enum Schema {
         public var defaultValue: Value { get throws { Value(try value.structField(at: 3)) } }
         public var hadExplicitDefault: Bool { get throws { try value.bool(atBit: 128) } }
         public var groupTypeID: ID { get throws { try value.integer(atByte: 16) } }
+        public var annotations: [Annotation] {
+            get throws { try structList(value.listField(at: 1), Annotation.init) }
+        }
     }
 
     public struct Enumerant {
@@ -253,6 +259,9 @@ public enum Schema {
         init(_ value: StructReader) { self.value = value }
         public var name: String { get throws { try text(value, 0) } }
         public var codeOrder: UInt16 { get throws { try value.integer(atByte: 0) } }
+        public var annotations: [Annotation] {
+            get throws { try structList(value.listField(at: 1), Annotation.init) }
+        }
     }
 
     public struct Method {
@@ -279,6 +288,7 @@ public enum Schema {
         public var kind: TypeKind { get throws { TypeKind(try value.integer(atByte: 0)) } }
         public var elementType: Type { get throws { Type(try value.structField(at: 0)) } }
         public var typeID: ID { get throws { try value.integer(atByte: 8) } }
+        public var brand: Brand { get throws { Brand(try value.structField(at: 1)) } }
         public var anyPointerKind: AnyPointerKind {
             get throws {
                 switch try value.integer(atByte: 8, as: UInt16.self) {
@@ -302,6 +312,43 @@ public enum Schema {
         }
     }
 
+    public struct Brand {
+        let value: StructReader
+        init(_ value: StructReader) { self.value = value }
+
+        public var scopes: [BrandScope] {
+            get throws { try structList(value.listField(at: 0), BrandScope.init) }
+        }
+    }
+
+    public struct BrandScope {
+        let value: StructReader
+        init(_ value: StructReader) { self.value = value }
+
+        public var scopeID: ID { get throws { try value.integer(atByte: 0) } }
+        public var isInherit: Bool { get throws { try value.integer(atByte: 8, as: UInt16.self) == 1 } }
+        public var bindings: [BrandBinding] {
+            get throws { try structList(value.listField(at: 0), BrandBinding.init) }
+        }
+    }
+
+    public struct BrandBinding {
+        let value: StructReader
+        init(_ value: StructReader) { self.value = value }
+
+        public var isUnbound: Bool { get throws { try value.integer(atByte: 0, as: UInt16.self) == 0 } }
+        public var type: Type { get throws { Type(try value.structField(at: 0)) } }
+    }
+
+    public struct Annotation {
+        let value: StructReader
+        init(_ value: StructReader) { self.value = value }
+
+        public var id: ID { get throws { try value.integer(atByte: 0) } }
+        public var valueExpression: Value { get throws { Value(try value.structField(at: 0)) } }
+        public var brand: Brand { get throws { Brand(try value.structField(at: 1)) } }
+    }
+
     public struct Value {
         let value: StructReader
         init(_ value: StructReader) { self.value = value }
@@ -322,6 +369,9 @@ public enum Schema {
         public var enumValue: UInt16 { get throws { try value.integer(atByte: 2) } }
         public var structValue: StructReader { get throws { try value.structField(at: 0) } }
         public var listValue: ListReader { get throws { try value.listField(at: 0) } }
+        public var anyPointerValue: AnyPointerReader {
+            get throws { try value.anyPointerField(at: 0) }
+        }
     }
 
     public struct RequestedFile {
