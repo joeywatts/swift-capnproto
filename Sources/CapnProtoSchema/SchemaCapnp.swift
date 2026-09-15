@@ -274,12 +274,21 @@ public enum Schema {
         public var isStreaming: Bool {
             get throws { try resultStructType == 0x995f_9a33_77c0_b16e }
         }
+        public var annotations: [Annotation] {
+            get throws { try structList(value.listField(at: 1), Annotation.init) }
+        }
+        public var paramBrand: Brand { get throws { Brand(try value.structField(at: 2)) } }
+        public var resultBrand: Brand { get throws { Brand(try value.structField(at: 3)) } }
+        public var implicitParameters: [Parameter] {
+            get throws { try structList(value.listField(at: 4), Parameter.init) }
+        }
     }
 
     public struct Superclass {
         let value: StructReader
         init(_ value: StructReader) { self.value = value }
         public var id: ID { get throws { try value.integer(atByte: 0) } }
+        public var brand: Brand { get throws { Brand(try value.structField(at: 0)) } }
     }
 
     public struct `Type` {
@@ -326,7 +335,9 @@ public enum Schema {
         init(_ value: StructReader) { self.value = value }
 
         public var scopeID: ID { get throws { try value.integer(atByte: 0) } }
-        public var isInherit: Bool { get throws { try value.integer(atByte: 8, as: UInt16.self) == 1 } }
+        public var isInherit: Bool {
+            get throws { try value.integer(atByte: 8, as: UInt16.self) == 1 }
+        }
         public var bindings: [BrandBinding] {
             get throws { try structList(value.listField(at: 0), BrandBinding.init) }
         }
@@ -336,7 +347,9 @@ public enum Schema {
         let value: StructReader
         init(_ value: StructReader) { self.value = value }
 
-        public var isUnbound: Bool { get throws { try value.integer(atByte: 0, as: UInt16.self) == 0 } }
+        public var isUnbound: Bool {
+            get throws { try value.integer(atByte: 0, as: UInt16.self) == 0 }
+        }
         public var type: Type { get throws { Type(try value.structField(at: 0)) } }
     }
 

@@ -6,7 +6,8 @@ public struct DynamicEnum: Equatable {
 
     public var name: String? {
         guard case .enumeration(let values) = schema.kind,
-              values.indices.contains(Int(rawValue)) else { return nil }
+            values.indices.contains(Int(rawValue))
+        else { return nil }
         return values[Int(rawValue)].name
     }
 
@@ -61,8 +62,9 @@ public struct DynamicStructReader {
         }
         switch field.storage {
         case .group(let id):
-            return .structure(try DynamicStructReader(
-                raw, schema: registry.requireSchema(id: id), registry: registry))
+            return .structure(
+                try DynamicStructReader(
+                    raw, schema: registry.requireSchema(id: id), registry: registry))
         case .slot(let offset, let type, let defaultValue):
             return try read(type, offset: offset, defaultValue: defaultValue)
         }
@@ -70,7 +72,8 @@ public struct DynamicStructReader {
 
     public func activeUnionField() throws -> SchemaField? {
         guard case .structure(_, _, _, _, let count, _, let fields) = schema.kind,
-              count > 0 else { return nil }
+            count > 0
+        else { return nil }
         let tag = try unionDiscriminant()
         return fields.first { $0.discriminantValue == tag }
     }
@@ -81,7 +84,8 @@ public struct DynamicStructReader {
 
     private func unionDiscriminant() throws -> UInt16 {
         guard case .structure(_, _, _, _, let count, let offset, _) = schema.kind,
-              count > 0 else { return 0 }
+            count > 0
+        else { return 0 }
         return try raw.discriminant(atByte: Int(offset) * 2)
     }
 
@@ -110,16 +114,19 @@ public struct DynamicStructReader {
         case .uint64:
             return .uint64(try raw.integer(atByte: index * 8, default: defaultValue.uint64 ?? 0))
         case .float32:
-            return .float32(try raw.float32(
-                atByte: index * 4, default: defaultValue.float32 ?? 0))
+            return .float32(
+                try raw.float32(
+                    atByte: index * 4, default: defaultValue.float32 ?? 0))
         case .float64:
-            return .float64(try raw.float64(
-                atByte: index * 8, default: defaultValue.float64 ?? 0))
+            return .float64(
+                try raw.float64(
+                    atByte: index * 8, default: defaultValue.float64 ?? 0))
         case .enumeration(let id, _):
             let rawValue: UInt16 = try raw.integer(
                 atByte: index * 2, default: defaultValue.enumeration ?? 0)
-            return .enumeration(try DynamicEnum(
-                rawValue: rawValue, schema: registry.requireSchema(id: id)))
+            return .enumeration(
+                try DynamicEnum(
+                    rawValue: rawValue, schema: registry.requireSchema(id: id)))
         case .text:
             if try !raw.hasPointer(at: index), case .text(let value) = defaultValue {
                 return .text(value)
@@ -137,15 +144,20 @@ public struct DynamicStructReader {
             let list: ListReader
             if try !raw.hasPointer(at: index), case .list(let value) = defaultValue {
                 list = value
-            } else { list = try raw.listField(at: index) }
+            } else {
+                list = try raw.listField(at: index)
+            }
             return .list(DynamicListReader(raw: list, elementType: element, registry: registry))
         case .structure(let id, _):
             let value: StructReader
             if try !raw.hasPointer(at: index), case .structure(let defaultReader) = defaultValue {
                 value = defaultReader
-            } else { value = try raw.structField(at: index) }
-            return .structure(try DynamicStructReader(
-                value, schema: registry.requireSchema(id: id), registry: registry))
+            } else {
+                value = try raw.structField(at: index)
+            }
+            return .structure(
+                try DynamicStructReader(
+                    value, schema: registry.requireSchema(id: id), registry: registry))
         case .interface:
             let pointer = try raw.anyPointerField(at: index)
             return .capability(pointer.isNull ? nil : try pointer.capabilityTableIndex)
@@ -191,17 +203,21 @@ public struct DynamicListReader {
             return .text(value)
         case .data: return .data(try raw.dataPointerElement(at: index).bytes)
         case .list(let nested):
-            return .list(DynamicListReader(
-                raw: try raw.pointerElement(at: index), elementType: nested, registry: registry))
+            return .list(
+                DynamicListReader(
+                    raw: try raw.pointerElement(at: index), elementType: nested, registry: registry)
+            )
         case .enumeration(let id, _):
             let value: UInt16 = try raw.integer(at: index)
-            return .enumeration(try DynamicEnum(
-                rawValue: value, schema: registry.requireSchema(id: id)))
+            return .enumeration(
+                try DynamicEnum(
+                    rawValue: value, schema: registry.requireSchema(id: id)))
         case .structure(let id, _):
-            return .structure(try DynamicStructReader(
-                raw.elementSize == .inlineComposite
-                    ? raw.structElement(at: index) : raw.structPointerElement(at: index),
-                schema: registry.requireSchema(id: id), registry: registry))
+            return .structure(
+                try DynamicStructReader(
+                    raw.elementSize == .inlineComposite
+                        ? raw.structElement(at: index) : raw.structPointerElement(at: index),
+                    schema: registry.requireSchema(id: id), registry: registry))
         case .interface:
             let pointer = try raw.anyPointerElement(at: index)
             return .capability(pointer.isNull ? nil : try pointer.capabilityTableIndex)
@@ -289,7 +305,8 @@ public struct DynamicStructBuilder {
 
     public func initStruct(named name: String) throws -> DynamicStructBuilder {
         guard let field = schema.field(named: name),
-              case .slot(let offset, .structure(let id, _), _) = field.storage else {
+            case .slot(let offset, .structure(let id, _), _) = field.storage
+        else {
             throw SchemaError.invalidNode(schema.id, "'\(name)' is not a struct field")
         }
         if let tag = field.discriminantValue { try selectUnion(tag: tag) }
@@ -304,7 +321,8 @@ public struct DynamicStructBuilder {
 
     public func initList(named name: String, count: Int) throws -> DynamicListBuilder {
         guard let field = schema.field(named: name),
-              case .slot(let offset, .list(let element), _) = field.storage else {
+            case .slot(let offset, .list(let element), _) = field.storage
+        else {
             throw SchemaError.invalidNode(schema.id, "'\(name)' is not a list field")
         }
         if let tag = field.discriminantValue { try selectUnion(tag: tag) }
@@ -314,14 +332,16 @@ public struct DynamicStructBuilder {
                 throw SchemaError.kindMismatch(expected: "struct", actual: child.kindName)
             }
             return DynamicListBuilder(
-                backing: .structures(try raw.initStructListField(
-                    at: Int(offset), count: count, dataWords: Int(data),
-                    pointerCount: Int(pointers))),
+                backing: .structures(
+                    try raw.initStructListField(
+                        at: Int(offset), count: count, dataWords: Int(data),
+                        pointerCount: Int(pointers))),
                 elementType: element, registry: registry)
         }
         return DynamicListBuilder(
-            backing: .plain(try raw.initListField(
-                at: Int(offset), elementSize: listElementSize(element), count: count)),
+            backing: .plain(
+                try raw.initListField(
+                    at: Int(offset), elementSize: listElementSize(element), count: count)),
             elementType: element, registry: registry)
     }
 
@@ -331,7 +351,8 @@ public struct DynamicStructBuilder {
 
     private func selectUnion(tag: UInt16) throws {
         guard case .structure(_, _, _, _, let count, let offset, let fields) = schema.kind,
-              count > 0 else { return }
+            count > 0
+        else { return }
         for field in fields where field.discriminantValue != nil {
             guard case .slot(let fieldOffset, let type, _) = field.storage else { continue }
             if type == .bool {
@@ -400,22 +421,34 @@ public struct DynamicListBuilder {
     public let registry: SchemaRegistry
 
     public var count: Int {
-        switch backing { case .plain(let value): value.count; case .structures(let value): value.count }
+        switch backing {
+        case .plain(let value): value.count;
+        case .structures(let value): value.count
+        }
     }
 
     public func set(_ value: DynamicValue, at index: Int) throws {
         switch (elementType, value, backing) {
         case (.bool, .bool(let value), .plain(let list)): try list.setBool(at: index, to: value)
         case (.int8, .int8(let value), .plain(let list)): try list.setInteger(at: index, to: value)
-        case (.int16, .int16(let value), .plain(let list)): try list.setInteger(at: index, to: value)
-        case (.int32, .int32(let value), .plain(let list)): try list.setInteger(at: index, to: value)
-        case (.int64, .int64(let value), .plain(let list)): try list.setInteger(at: index, to: value)
-        case (.uint8, .uint8(let value), .plain(let list)): try list.setInteger(at: index, to: value)
-        case (.uint16, .uint16(let value), .plain(let list)): try list.setInteger(at: index, to: value)
-        case (.uint32, .uint32(let value), .plain(let list)): try list.setInteger(at: index, to: value)
-        case (.uint64, .uint64(let value), .plain(let list)): try list.setInteger(at: index, to: value)
-        case (.float32, .float32(let value), .plain(let list)): try list.setFloat32(at: index, to: value)
-        case (.float64, .float64(let value), .plain(let list)): try list.setFloat64(at: index, to: value)
+        case (.int16, .int16(let value), .plain(let list)):
+            try list.setInteger(at: index, to: value)
+        case (.int32, .int32(let value), .plain(let list)):
+            try list.setInteger(at: index, to: value)
+        case (.int64, .int64(let value), .plain(let list)):
+            try list.setInteger(at: index, to: value)
+        case (.uint8, .uint8(let value), .plain(let list)):
+            try list.setInteger(at: index, to: value)
+        case (.uint16, .uint16(let value), .plain(let list)):
+            try list.setInteger(at: index, to: value)
+        case (.uint32, .uint32(let value), .plain(let list)):
+            try list.setInteger(at: index, to: value)
+        case (.uint64, .uint64(let value), .plain(let list)):
+            try list.setInteger(at: index, to: value)
+        case (.float32, .float32(let value), .plain(let list)):
+            try list.setFloat32(at: index, to: value)
+        case (.float64, .float64(let value), .plain(let list)):
+            try list.setFloat64(at: index, to: value)
         case (.text, .text(let value), .plain(let list)): try list.setText(at: index, to: value)
         case (.data, .data(let value), .plain(let list)): try list.setData(at: index, to: value)
         case (.enumeration, .enumeration(let value), .plain(let list)):
@@ -423,7 +456,7 @@ public struct DynamicListBuilder {
         case (.interface, .capability(.some(let value)), .plain(let list)):
             try list.setCapability(at: index, tableIndex: value)
         case (.structure(let id, _), .structure(let value), .structures(let list))
-            where id == value.schema.id:
+        where id == value.schema.id:
             try list[index].copyContent(from: value.raw)
         case (.anyPointer, .anyPointer(let value), .plain(let list)):
             try list.anyPointer(at: index).set(value)
@@ -445,8 +478,9 @@ public struct DynamicListBuilder {
             throw SchemaError.kindMismatch(expected: "list of lists", actual: "list")
         }
         return DynamicListBuilder(
-            backing: .plain(try list.initList(
-                at: index, elementSize: listElementSize(nested), count: count)),
+            backing: .plain(
+                try list.initList(
+                    at: index, elementSize: listElementSize(nested), count: count)),
             elementType: nested, registry: registry)
     }
 }

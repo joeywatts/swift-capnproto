@@ -41,8 +41,9 @@ private let emptyBrand = SchemaBrand()
     #expect(loader.registry.schema(id: old.id)?.field(named: "extra") != nil)
 
     var missing = SchemaLoader()
-    try missing.load(SchemaNode(
-        id: 20, displayName: "MissingOwner", nestedNodes: ["Child": 21], kind: .file))
+    try missing.load(
+        SchemaNode(
+            id: 20, displayName: "MissingOwner", nestedNodes: ["Child": 21], kind: .file))
     #expect(throws: SchemaError.missingSchema(21)) { try missing.finish() }
 
     var invalid = SchemaLoader()
@@ -50,11 +51,13 @@ private let emptyBrand = SchemaBrand()
         name: "bad", codeOrder: 0,
         storage: .slot(offset: UInt32.max, type: .uint64, defaultValue: .uint64(0)))
     #expect(throws: SchemaError.self) {
-        try invalid.load(SchemaNode(
-            id: 22, displayName: "Invalid", kind: .structure(
-                dataWordCount: 1, pointerCount: 0, preferredListEncoding: .inlineComposite,
-                isGroup: false, discriminantCount: 0, discriminantOffset: 0,
-                fields: [invalidField])))
+        try invalid.load(
+            SchemaNode(
+                id: 22, displayName: "Invalid",
+                kind: .structure(
+                    dataWordCount: 1, pointerCount: 0, preferredListEncoding: .inlineComposite,
+                    isGroup: false, discriminantCount: 0, discriminantOffset: 0,
+                    fields: [invalidField])))
     }
 }
 
@@ -73,8 +76,9 @@ private let emptyBrand = SchemaBrand()
     try builder.set(.text("hello\nworld"), named: "name")
     try builder.set(.data([0, 1, 0xfe, 0xff]), named: "bytes")
     try builder.set(
-        .enumeration(try DynamicEnum(
-            rawValue: 1, schema: schemas.requireSchema(id: 101))), named: "color")
+        .enumeration(
+            try DynamicEnum(
+                rawValue: 1, schema: schemas.requireSchema(id: 101))), named: "color")
 
     let numbers = try builder.initList(named: "numbers", count: 3)
     try numbers.set(.uint16(2), at: 0)
@@ -96,8 +100,9 @@ private let emptyBrand = SchemaBrand()
 
     let rawNumber: Int32 = try reader.asTyped { try $0.integer(atByte: 4) }
     #expect(rawNumber == -1234)
-    #expect(try DynamicDiagnostics.describe(reader)
-        == DynamicDiagnostics.describe(reader.raw, schema: rootSchema, registry: schemas))
+    #expect(
+        try DynamicDiagnostics.describe(reader)
+            == DynamicDiagnostics.describe(reader.raw, schema: rootSchema, registry: schemas))
     #expect(try DynamicDiagnostics.describe(reader).contains("name = \"hello\\nworld\""))
     #expect(try DynamicDiagnostics.describe(reader).contains("ratio = -0"))
 }
@@ -147,24 +152,29 @@ private let emptyBrand = SchemaBrand()
     let limited = try DynamicDiagnostics.describe(
         reader, options: DiagnosticOptions(maximumDepth: 4, maximumListElements: 2))
     #expect(limited.contains("numbers = [0, 1, ...]"))
-    #expect(try DynamicDiagnostics.describe(
-        reader, options: DiagnosticOptions(maximumDepth: 0)) == "...")
+    #expect(
+        try DynamicDiagnostics.describe(
+            reader, options: DiagnosticOptions(maximumDepth: 0)) == "...")
 }
 
 private func bootstrapRequest() throws -> Schema.CodeGeneratorRequest {
-    let url = try #require(Bundle.module.url(
-        forResource: "bootstrap-request", withExtension: "bin", subdirectory: "Fixtures"))
+    let url = try #require(
+        Bundle.module.url(
+            forResource: "bootstrap-request", withExtension: "bin", subdirectory: "Fixtures"))
     return try Schema.CodeGeneratorRequest(framedBytes: Array(Data(contentsOf: url)))
 }
 
 private func makeRecord(fieldCount: Int, dataWords: UInt16) -> SchemaNode {
-    var fields = [SchemaField(
-        name: "value", codeOrder: 0,
-        storage: .slot(offset: 0, type: .uint64, defaultValue: .uint64(0)))]
+    var fields = [
+        SchemaField(
+            name: "value", codeOrder: 0,
+            storage: .slot(offset: 0, type: .uint64, defaultValue: .uint64(0)))
+    ]
     if fieldCount > 1 {
-        fields.append(SchemaField(
-            name: "extra", codeOrder: 1,
-            storage: .slot(offset: 1, type: .uint64, defaultValue: .uint64(0))))
+        fields.append(
+            SchemaField(
+                name: "extra", codeOrder: 1,
+                storage: .slot(offset: 1, type: .uint64, defaultValue: .uint64(0))))
     }
     return SchemaNode(
         id: 10, displayName: "Evolution.Record", displayNamePrefixLength: 10,
@@ -186,9 +196,11 @@ private func makeDynamicRegistry() throws -> SchemaRegistry {
         kind: .structure(
             dataWordCount: 1, pointerCount: 0, preferredListEncoding: .inlineComposite,
             isGroup: false, discriminantCount: 0, discriminantOffset: 0,
-            fields: [SchemaField(
-                name: "value", codeOrder: 0,
-                storage: .slot(offset: 0, type: .uint32, defaultValue: .uint32(0)))]))
+            fields: [
+                SchemaField(
+                    name: "value", codeOrder: 0,
+                    storage: .slot(offset: 0, type: .uint32, defaultValue: .uint32(0)))
+            ]))
     let root = SchemaNode(
         id: 100, displayName: "Dynamic.Root", displayNamePrefixLength: 8,
         nestedNodes: ["Color": 101, "Child": 102],
@@ -196,29 +208,42 @@ private func makeDynamicRegistry() throws -> SchemaRegistry {
             dataWordCount: 4, pointerCount: 5, preferredListEncoding: .inlineComposite,
             isGroup: false, discriminantCount: 0, discriminantOffset: 0,
             fields: [
-                SchemaField(name: "flag", codeOrder: 0,
+                SchemaField(
+                    name: "flag", codeOrder: 0,
                     storage: .slot(offset: 0, type: .bool, defaultValue: .bool(false))),
-                SchemaField(name: "number", codeOrder: 1,
+                SchemaField(
+                    name: "number", codeOrder: 1,
                     storage: .slot(offset: 1, type: .int32, defaultValue: .int32(0))),
-                SchemaField(name: "big", codeOrder: 2,
+                SchemaField(
+                    name: "big", codeOrder: 2,
                     storage: .slot(offset: 1, type: .uint64, defaultValue: .uint64(0))),
-                SchemaField(name: "ratio", codeOrder: 3,
+                SchemaField(
+                    name: "ratio", codeOrder: 3,
                     storage: .slot(offset: 3, type: .float64, defaultValue: .float64(0))),
-                SchemaField(name: "color", codeOrder: 4,
-                    storage: .slot(offset: 1, type: .enumeration(id: 101, brand: emptyBrand),
-                                   defaultValue: .enumeration(0))),
-                SchemaField(name: "name", codeOrder: 5,
+                SchemaField(
+                    name: "color", codeOrder: 4,
+                    storage: .slot(
+                        offset: 1, type: .enumeration(id: 101, brand: emptyBrand),
+                        defaultValue: .enumeration(0))),
+                SchemaField(
+                    name: "name", codeOrder: 5,
                     storage: .slot(offset: 0, type: .text, defaultValue: .text(""))),
-                SchemaField(name: "bytes", codeOrder: 6,
+                SchemaField(
+                    name: "bytes", codeOrder: 6,
                     storage: .slot(offset: 1, type: .data, defaultValue: .data([]))),
-                SchemaField(name: "numbers", codeOrder: 7,
+                SchemaField(
+                    name: "numbers", codeOrder: 7,
                     storage: .slot(offset: 2, type: .list(.uint16), defaultValue: .void)),
-                SchemaField(name: "child", codeOrder: 8,
-                    storage: .slot(offset: 3, type: .structure(id: 102, brand: emptyBrand),
-                                   defaultValue: .void)),
-                SchemaField(name: "service", codeOrder: 9,
-                    storage: .slot(offset: 4, type: .interface(id: 104, brand: emptyBrand),
-                                   defaultValue: .interface)),
+                SchemaField(
+                    name: "child", codeOrder: 8,
+                    storage: .slot(
+                        offset: 3, type: .structure(id: 102, brand: emptyBrand),
+                        defaultValue: .void)),
+                SchemaField(
+                    name: "service", codeOrder: 9,
+                    storage: .slot(
+                        offset: 4, type: .interface(id: 104, brand: emptyBrand),
+                        defaultValue: .interface)),
             ]))
     let union = SchemaNode(
         id: 103, displayName: "Dynamic.Choice", displayNamePrefixLength: 8,
@@ -226,9 +251,11 @@ private func makeDynamicRegistry() throws -> SchemaRegistry {
             dataWordCount: 1, pointerCount: 1, preferredListEncoding: .inlineComposite,
             isGroup: false, discriminantCount: 2, discriminantOffset: 2,
             fields: [
-                SchemaField(name: "number", codeOrder: 0, discriminantValue: 0,
+                SchemaField(
+                    name: "number", codeOrder: 0, discriminantValue: 0,
                     storage: .slot(offset: 0, type: .int32, defaultValue: .int32(0))),
-                SchemaField(name: "text", codeOrder: 1, discriminantValue: 1,
+                SchemaField(
+                    name: "text", codeOrder: 1, discriminantValue: 1,
                     storage: .slot(offset: 0, type: .text, defaultValue: .text(""))),
             ]))
     let service = SchemaNode(

@@ -57,7 +57,7 @@ public enum DynamicDiagnostics {
             result += "}"
         case .interface(let methods, let superclasses):
             if !superclasses.isEmpty {
-                result += " : " + superclasses.map(hexSchemaID).joined(separator: ", ")
+                result += " : " + superclasses.map { hexSchemaID($0.id) }.joined(separator: ", ")
             }
             let shown = methods.prefix(options.maximumListElements).map {
                 "\($0.name)(@\(hexSchemaID($0.paramStructType))) -> @\(hexSchemaID($0.resultStructType))"
@@ -67,7 +67,8 @@ public enum DynamicDiagnostics {
             result += "}"
         case .constant(let type, _): result += ": \(describe(type: type))"
         case .annotation(let type, let targets):
-            result += ": \(describe(type: type)) ["
+            result +=
+                ": \(describe(type: type)) ["
                 + targets.map(\.rawValue).sorted().joined(separator: ", ") + "]"
         }
         return result
@@ -105,8 +106,9 @@ public enum DynamicDiagnostics {
             var values = [String]()
             values.reserveCapacity(limit + (limit < list.count ? 1 : 0))
             for index in 0..<limit {
-                values.append(try describe(
-                    list.value(at: index), options: options, depth: depth + 1))
+                values.append(
+                    try describe(
+                        list.value(at: index), options: options, depth: depth + 1))
             }
             if limit < list.count { values.append("...") }
             return "[" + values.joined(separator: ", ") + "]"
@@ -127,8 +129,10 @@ public enum DynamicDiagnostics {
             values.reserveCapacity(limit + (limit < eligible.count ? 1 : 0))
             for field in eligible.prefix(limit) {
                 let value = try reader.value(of: field)
-                values.append("\(field.name) = " + (try describe(
-                    value, options: options, depth: depth + 1)))
+                values.append(
+                    "\(field.name) = "
+                        + (try describe(
+                            value, options: options, depth: depth + 1)))
             }
             return "(" + values.joined(separator: ", ") + ")"
         }

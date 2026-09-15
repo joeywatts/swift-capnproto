@@ -81,6 +81,12 @@ public struct SchemaAnnotation {
     public var id: Schema.ID
     public var brand: SchemaBrand
     public var value: SchemaDefaultValue
+
+    public init(id: Schema.ID, brand: SchemaBrand = SchemaBrand(), value: SchemaDefaultValue) {
+        self.id = id
+        self.brand = brand
+        self.value = value
+    }
 }
 
 public struct SchemaField {
@@ -128,16 +134,36 @@ public struct SchemaMethod {
     public var paramStructType: Schema.ID
     public var resultStructType: Schema.ID
     public var isStreaming: Bool
+    public var implicitParameters: [String]
+    public var paramBrand: SchemaBrand
+    public var resultBrand: SchemaBrand
+    public var annotations: [SchemaAnnotation]
 
     public init(
         name: String, codeOrder: UInt16, paramStructType: Schema.ID,
-        resultStructType: Schema.ID, isStreaming: Bool = false
+        resultStructType: Schema.ID, isStreaming: Bool = false,
+        implicitParameters: [String] = [], paramBrand: SchemaBrand = SchemaBrand(),
+        resultBrand: SchemaBrand = SchemaBrand(), annotations: [SchemaAnnotation] = []
     ) {
         self.name = name
         self.codeOrder = codeOrder
         self.paramStructType = paramStructType
         self.resultStructType = resultStructType
         self.isStreaming = isStreaming
+        self.implicitParameters = implicitParameters
+        self.paramBrand = paramBrand
+        self.resultBrand = resultBrand
+        self.annotations = annotations
+    }
+}
+
+public struct SchemaSuperclass: Equatable, Sendable {
+    public var id: Schema.ID
+    public var brand: SchemaBrand
+
+    public init(id: Schema.ID, brand: SchemaBrand = SchemaBrand()) {
+        self.id = id
+        self.brand = brand
     }
 }
 
@@ -154,7 +180,7 @@ public enum SchemaNodeKind {
         discriminantCount: UInt16, discriminantOffset: UInt32,
         fields: [SchemaField])
     case enumeration([SchemaEnumerant])
-    case interface(methods: [SchemaMethod], superclasses: [Schema.ID])
+    case interface(methods: [SchemaMethod], superclasses: [SchemaSuperclass])
     case constant(type: SchemaType, value: SchemaDefaultValue)
     case annotation(type: SchemaType, targets: Set<AnnotationTarget>)
 }
@@ -167,6 +193,7 @@ public struct SchemaNode {
     public var parameters: [String]
     public var isGeneric: Bool
     public var nestedNodes: [String: Schema.ID]
+    public var importIDs: Set<Schema.ID>
     public var annotations: [SchemaAnnotation]
     public var kind: SchemaNodeKind
 
@@ -174,7 +201,7 @@ public struct SchemaNode {
         id: Schema.ID, displayName: String, displayNamePrefixLength: UInt32 = 0,
         scopeID: Schema.ID = 0, parameters: [String] = [], isGeneric: Bool = false,
         nestedNodes: [String: Schema.ID] = [:], annotations: [SchemaAnnotation] = [],
-        kind: SchemaNodeKind
+        importIDs: Set<Schema.ID> = [], kind: SchemaNodeKind
     ) {
         self.id = id
         self.displayName = displayName
@@ -183,6 +210,7 @@ public struct SchemaNode {
         self.parameters = parameters
         self.isGeneric = isGeneric
         self.nestedNodes = nestedNodes
+        self.importIDs = importIDs
         self.annotations = annotations
         self.kind = kind
     }
@@ -221,13 +249,14 @@ public struct SchemaNode {
 
     public var dependencyIDs: Set<Schema.ID> {
         var result = Set<Schema.ID>()
+        result.formUnion(importIDs)
         if scopeID != 0 { result.insert(scopeID) }
         result.formUnion(nestedNodes.values)
         func add(_ type: SchemaType) {
             switch type {
             case .list(let element): add(element)
             case .enumeration(let id, let brand), .structure(let id, let brand),
-                 .interface(let id, let brand):
+                .interface(let id, let brand):
                 result.insert(id)
                 for scope in brand.scopes {
                     if scope.scopeID != 0 { result.insert(scope.scopeID) }
@@ -250,7 +279,7 @@ public struct SchemaNode {
                 }
             }
         case .interface(let methods, let supers):
-            result.formUnion(supers)
+            result.formUnion(supers.map(\.id))
             for method in methods {
                 result.insert(method.paramStructType)
                 result.insert(method.resultStructType)
@@ -327,6 +356,7 @@ extension SchemaNode {
         parameters = try proto.parameters.map { try $0.name }
         isGeneric = try proto.isGeneric
         nestedNodes = try uniqueDictionary(proto.nestedNodes.map { (try $0.name, try $0.id) })
+        importIDs = []
         annotations = try proto.annotations.map(SchemaAnnotation.init)
         switch try proto.kind {
         case .file: kind = .file
@@ -341,11 +371,12 @@ extension SchemaNode {
                 discriminantOffset: proto.discriminantOffset,
                 fields: proto.fields.map(SchemaField.init))
         case .enum:
-            kind = try .enumeration(proto.enumerants.map {
-                SchemaEnumerant(
-                    name: try $0.name, codeOrder: try $0.codeOrder,
-                    annotations: try $0.annotations.map(SchemaAnnotation.init))
-            })
+            kind = try .enumeration(
+                proto.enumerants.map {
+                    SchemaEnumerant(
+                        name: try $0.name, codeOrder: try $0.codeOrder,
+                        annotations: try $0.annotations.map(SchemaAnnotation.init))
+                })
         case .interface:
             kind = try .interface(
                 methods: proto.methods.map {
@@ -353,12 +384,19 @@ extension SchemaNode {
                         name: try $0.name, codeOrder: try $0.codeOrder,
                         paramStructType: try $0.paramStructType,
                         resultStructType: try $0.resultStructType,
-                        isStreaming: try $0.isStreaming)
+                        isStreaming: try $0.isStreaming,
+                        implicitParameters: try $0.implicitParameters.map { try $0.name },
+                        paramBrand: try SchemaBrand($0.paramBrand),
+                        resultBrand: try SchemaBrand($0.resultBrand),
+                        annotations: try $0.annotations.map(SchemaAnnotation.init))
                 },
-                superclasses: proto.superclasses.map { try $0.id })
+                superclasses: proto.superclasses.map {
+                    try SchemaSuperclass(id: $0.id, brand: SchemaBrand($0.brand))
+                })
         case .constant:
             kind = try .constant(
-                type: SchemaType(proto.constantType), value: SchemaDefaultValue(proto.constantValue))
+                type: SchemaType(proto.constantType), value: SchemaDefaultValue(proto.constantValue)
+            )
         case .annotation:
             var targets = Set<AnnotationTarget>()
             for (index, target) in AnnotationTarget.allCases.enumerated()
@@ -416,9 +454,10 @@ extension SchemaBrand {
             }
             return try SchemaBrandScope(
                 scopeID: $0.scopeID,
-                binding: .bindings($0.bindings.map {
-                    try $0.isUnbound ? .unbound : .type(SchemaType($0.type))
-                }))
+                binding: .bindings(
+                    $0.bindings.map {
+                        try $0.isUnbound ? .unbound : .type(SchemaType($0.type))
+                    }))
         }
     }
 }
@@ -497,17 +536,20 @@ private func validateNode(_ node: SchemaNode) throws {
         for field in fields {
             if let tag = field.discriminantValue {
                 guard tag < count, tags.insert(tag).inserted else {
-                    throw SchemaError.invalidNode(node.id, "invalid or duplicate union discriminant")
+                    throw SchemaError.invalidNode(
+                        node.id, "invalid or duplicate union discriminant")
                 }
             }
             guard case .slot(let offset, let type, _) = field.storage else { continue }
             if let bits = scalarBitWidth(type) {
                 let end = UInt64(offset) * UInt64(bits) + UInt64(bits)
                 guard end <= UInt64(dataWords) * 64 else {
-                    throw SchemaError.invalidNode(node.id, "field '\(field.name)' is outside data section")
+                    throw SchemaError.invalidNode(
+                        node.id, "field '\(field.name)' is outside data section")
                 }
             } else if isPointerType(type), offset >= UInt32(pointers) {
-                throw SchemaError.invalidNode(node.id, "field '\(field.name)' is outside pointer section")
+                throw SchemaError.invalidNode(
+                    node.id, "field '\(field.name)' is outside pointer section")
             }
         }
     case .enumeration(let values):

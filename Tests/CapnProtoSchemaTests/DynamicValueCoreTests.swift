@@ -6,8 +6,9 @@ import Testing
 // Ported behavior from capnproto@3a82de9b dynamic-test.c++ and test-util.c++:
 // defaults plus dynamic writes readable through the underlying typed/raw view.
 @Test func dynamicBootstrapFixtureRoundTrips() throws {
-    let url = try #require(Bundle.module.url(
-        forResource: "bootstrap-request", withExtension: "bin", subdirectory: "Fixtures"))
+    let url = try #require(
+        Bundle.module.url(
+            forResource: "bootstrap-request", withExtension: "bin", subdirectory: "Fixtures"))
     let request = try Schema.CodeGeneratorRequest(
         framedBytes: Array(Data(contentsOf: url)))
     var loader = SchemaLoader()

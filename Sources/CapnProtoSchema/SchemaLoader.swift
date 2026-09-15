@@ -42,7 +42,15 @@ public struct SchemaLoader {
 
     @discardableResult
     public mutating func load(request: Schema.CodeGeneratorRequest) throws -> [SchemaNode] {
-        try load(request.nodes)
+        var loaded = try load(request.nodes)
+        for requestedFile in try request.requestedFiles {
+            let id = try requestedFile.id
+            guard var file = registry.schema(id: id) else { throw SchemaError.missingSchema(id) }
+            file.importIDs = Set(try requestedFile.imports.map { try $0.id })
+            let updated = try load(file)
+            if let index = loaded.firstIndex(where: { $0.id == id }) { loaded[index] = updated }
+        }
+        return loaded
     }
 
     public func finish() throws { try registry.validateGraph() }
@@ -56,8 +64,10 @@ public struct SchemaLoader {
         switch (candidate.kind, existing.kind) {
         case (.file, .file):
             return .init(canReadExisting: true, canWriteExisting: true, isEquivalent: true)
-        case let (.structure(cd, cp, _, _, cdc, cdo, cf),
-                  .structure(ed, ep, _, _, edc, edo, ef)):
+        case let (
+            .structure(cd, cp, _, _, cdc, cdo, cf),
+            .structure(ed, ep, _, _, edc, edo, ef)
+        ):
             let common = min(cf.count, ef.count)
             let shared = (0..<common).allSatisfy { fieldsWireCompatible(cf[$0], ef[$0]) }
             let unionOK = cdc == edc && (cdc == 0 || cdo == edo)
@@ -79,14 +89,16 @@ public struct SchemaLoader {
                 cm[$0].name == em[$0].name
                     && cm[$0].paramStructType == em[$0].paramStructType
                     && cm[$0].resultStructType == em[$0].resultStructType
+                    && cm[$0].paramBrand == em[$0].paramBrand
+                    && cm[$0].resultBrand == em[$0].resultBrand
             }
-            let supers = Set(cs) == Set(es)
+            let supers = cs == es
             return .init(
                 canReadExisting: shared && supers && cm.count >= em.count,
                 canWriteExisting: shared && supers && em.count >= cm.count,
                 isEquivalent: shared && supers && cm.count == em.count)
         case (.constant(let ct, _), .constant(let et, _)),
-             (.annotation(let ct, _), .annotation(let et, _)):
+            (.annotation(let ct, _), .annotation(let et, _)):
             let equal = ct == et
             return .init(canReadExisting: equal, canWriteExisting: equal, isEquivalent: equal)
         default:

@@ -8,14 +8,16 @@ import Testing
         name: "value", codeOrder: 0,
         storage: .slot(offset: 0, type: .uint64, defaultValue: .uint64(0)))
     let old = SchemaNode(
-        id: 1, displayName: "Record", kind: .structure(
+        id: 1, displayName: "Record",
+        kind: .structure(
             dataWordCount: 1, pointerCount: 0, preferredListEncoding: .inlineComposite,
             isGroup: false, discriminantCount: 0, discriminantOffset: 0, fields: [field]))
     let extra = SchemaField(
         name: "extra", codeOrder: 1,
         storage: .slot(offset: 1, type: .uint64, defaultValue: .uint64(0)))
     let new = SchemaNode(
-        id: 1, displayName: "Record", kind: .structure(
+        id: 1, displayName: "Record",
+        kind: .structure(
             dataWordCount: 2, pointerCount: 0, preferredListEncoding: .inlineComposite,
             isGroup: false, discriminantCount: 0, discriminantOffset: 0,
             fields: [field, extra]))
@@ -28,12 +30,15 @@ import Testing
     #expect(SchemaLoader.compatibility(of: new, with: old).canReadExisting)
 
     let invalid = SchemaNode(
-        id: 2, displayName: "Invalid", kind: .structure(
+        id: 2, displayName: "Invalid",
+        kind: .structure(
             dataWordCount: 1, pointerCount: 0, preferredListEncoding: .inlineComposite,
             isGroup: false, discriminantCount: 0, discriminantOffset: 0,
-            fields: [SchemaField(
-                name: "bad", codeOrder: 0,
-                storage: .slot(
-                    offset: UInt32.max, type: .uint64, defaultValue: .uint64(0)))]))
+            fields: [
+                SchemaField(
+                    name: "bad", codeOrder: 0,
+                    storage: .slot(
+                        offset: UInt32.max, type: .uint64, defaultValue: .uint64(0)))
+            ]))
     #expect(throws: SchemaError.self) { try loader.load(invalid) }
 }
