@@ -21,6 +21,7 @@ public enum SwiftGeneratorError: Error, Equatable, CustomStringConvertible {
     case requestedNodeIsNotFile(Schema.ID)
     case invalidOutputPath(String)
     case unsupportedSchema(String)
+    case sourceLocated(source: String, startByte: UInt32, endByte: UInt32, detail: String)
 
     public var description: String {
         switch self {
@@ -30,6 +31,8 @@ public enum SwiftGeneratorError: Error, Equatable, CustomStringConvertible {
             return "requested node \(hex(id)) is not a file"
         case .invalidOutputPath(let path): return "invalid generated output path: \(path)"
         case .unsupportedSchema(let detail): return "unsupported schema construct: \(detail)"
+        case .sourceLocated(let source, let start, let end, let detail):
+            return "\(source):bytes \(start)-\(end): \(detail)"
         }
     }
 }
@@ -74,15 +77,29 @@ public struct SwiftGenerator {
             "// source: \(sourceName)",
             "",
             "import CapnProto",
+        ]
+        if try fileNeedsRPC(file, nodes: nodes) {
+            lines.append("import CapnProtoRPC")
+        }
+        lines.append(contentsOf: [
             "",
             "private func _capnpRequiredText(_ value: TextReader) throws -> String {",
             "    guard let string = value.string else { throw CapnProtoError.invalidText }",
             "    return string",
             "}",
             "",
-        ]
+        ])
         for nested in try file.nestedNodes {
-            try emitDeclaration(nested, nodes: nodes, names: names, indent: "", into: &lines)
+            do {
+                try emitDeclaration(nested, nodes: nodes, names: names, indent: "", into: &lines)
+            } catch SwiftGeneratorError.unsupportedSchema(let detail) {
+                guard let node = nodes[try nested.id] else {
+                    throw SwiftGeneratorError.missingNode(try nested.id)
+                }
+                throw SwiftGeneratorError.sourceLocated(
+                    source: sourceName, startByte: try node.startByte, endByte: try node.endByte,
+                    detail: detail)
+            }
         }
         return lines.joined(separator: "\n") + "\n"
     }
@@ -105,13 +122,15 @@ public struct SwiftGenerator {
                 node, name: swiftIdentifier(try nested.name), names: names,
                 indent: indent, into: &lines)
         case .interface:
-            try emitInterfacePlaceholder(
+            try emitInterface(
                 node, name: swiftIdentifier(try nested.name), nodes: nodes, names: names,
                 indent: indent, into: &lines)
-        default:
+        case .file, .annotation:
             try emitNamespace(
                 node, name: swiftIdentifier(try nested.name), nodes: nodes,
                 names: names, indent: indent, into: &lines)
+        case .unknown(let value):
+            throw SwiftGeneratorError.unsupportedSchema("node discriminant \(value)")
         }
     }
 
@@ -128,18 +147,91 @@ public struct SwiftGenerator {
         lines.append("")
     }
 
-    private func emitInterfacePlaceholder(
+    private func emitInterface(
         _ node: Schema.Node, name: String, nodes: [Schema.ID: Schema.Node],
         names: [Schema.ID: String], indent: String, into lines: inout [String]
     ) throws {
+        let interfaceID = try node.id
+        let methods = try node.methods
+        let superclasses = try node.superclasses
         lines.append("\(indent)public enum \(name) {")
+        lines.append("\(indent)    public static let schemaID: UInt64 = \(interfaceID)")
+        lines.append(
+            "\(indent)    public static let superclassIDs: [UInt64] = [\(try superclasses.map { String(try $0.id) }.joined(separator: ", "))]"
+        )
+        lines.append("")
         lines.append("\(indent)    public struct Client {")
-        lines.append("\(indent)        public let raw: AnyPointerReader")
-        lines.append("\(indent)        public init(_ raw: AnyPointerReader) { self.raw = raw }")
+        lines.append("\(indent)        public let raw: CapabilityClient")
+        lines.append("\(indent)        public init(_ raw: CapabilityClient) { self.raw = raw }")
+        lines.append(
+            "\(indent)        public init(_ pointer: AnyPointerReader) { raw = CapabilityClient(pointer: pointer) }"
+        )
+        for method in methods {
+            let methodName = swiftIdentifier(try method.name)
+            let params = try methodTypeName(method.paramStructType, names: names)
+            let results = try methodTypeName(method.resultStructType, names: names)
+            if try method.isStreaming {
+                lines.append(
+                    "\(indent)        public func \(methodName)(_ params: \(params).Reader) async throws { _ = try await raw.call(Methods.\(methodName), params: params.raw) }"
+                )
+            } else {
+                lines.append(
+                    "\(indent)        public func \(methodName)(_ params: \(params).Reader) async throws -> \(results).Reader { \(results).Reader(try await raw.call(Methods.\(methodName), params: params.raw)) }"
+                )
+            }
+        }
+        lines.append("\(indent)    }")
+        lines.append("")
+        let inherited = try superclasses.map {
+            guard let inheritedName = names[try $0.id] else {
+                throw SwiftGeneratorError.missingNode(try $0.id)
+            }
+            return inheritedName + ".Server"
+        }
+        let inheritance = inherited.isEmpty ? "" : ": " + inherited.joined(separator: ", ")
+        lines.append("\(indent)    public protocol Server\(inheritance) {")
+        for method in methods {
+            let methodName = swiftIdentifier(try method.name)
+            let params = try methodTypeName(method.paramStructType, names: names)
+            let results = try methodTypeName(method.resultStructType, names: names)
+            if try method.isStreaming {
+                lines.append(
+                    "\(indent)        func \(methodName)(_ params: \(params).Reader) async throws")
+            } else {
+                lines.append(
+                    "\(indent)        func \(methodName)(_ params: \(params).Reader, results: \(results).Builder) async throws"
+                )
+            }
+        }
+        lines.append("\(indent)    }")
+        lines.append("")
+        lines.append("\(indent)    public enum Methods {")
+        for (methodID, method) in methods.enumerated() {
+            let methodName = swiftIdentifier(try method.name)
+            lines.append(
+                "\(indent)        public static let \(methodName) = CapabilityMethodDescriptor(interfaceID: \(interfaceID), methodID: \(methodID), name: \(String(reflecting: try method.name)), paramStructID: \(try method.paramStructType), resultStructID: \(try method.resultStructType), isStreaming: \(try method.isStreaming))"
+            )
+        }
         lines.append("\(indent)    }")
         for child in try node.nestedNodes {
+            lines.append("")
             try emitDeclaration(
                 child, nodes: nodes, names: names, indent: indent + "    ", into: &lines)
+        }
+        var emitted = Set(try node.nestedNodes.map { try $0.id })
+        let qualifiedInterfaceName = names[interfaceID] ?? name
+        for method in methods {
+            for id in [try method.paramStructType, try method.resultStructType] {
+                guard emitted.insert(id).inserted, let methodNode = nodes[id],
+                    try methodNode.scopeID == 0, let qualified = names[id],
+                    qualified.hasPrefix(qualifiedInterfaceName + ".")
+                else { continue }
+                let localName = String(qualified.dropFirst(qualifiedInterfaceName.count + 1))
+                lines.append("")
+                try emitStruct(
+                    methodNode, name: localName, nodes: nodes, names: names,
+                    indent: indent + "    ", into: &lines)
+            }
         }
         lines.append("\(indent)}")
         lines.append("")
@@ -528,6 +620,16 @@ public struct SwiftGenerator {
             lines.append(
                 "\(indent)public var \(swiftIdentifier(originalName)): AnyPointerBuilder { get throws { try raw.anyPointerField(at: \(offset)) } }"
             )
+        case .interface:
+            lines.append("\(indent)public func \(method)(_ value: \(swift)) throws {")
+            lines.append(
+                "\(indent)    guard let tableIndex = value.raw.tableIndex else { throw CapabilityError.unserializableCapability }"
+            )
+            if let selection { lines.append(selection) }
+            lines.append(
+                "\(indent)    try raw.setCapabilityField(at: \(offset), tableIndex: tableIndex)"
+            )
+            lines.append("\(indent)}")
         default:
             break
         }
@@ -550,7 +652,7 @@ public struct SwiftGenerator {
         into lines: inout [String]
     ) throws {
         switch try element.kind {
-        case .interface, .unknown:
+        case .unknown:
             return
         default:
             break
@@ -626,6 +728,15 @@ public struct SwiftGenerator {
             lines.append(
                 "\(indent)for (index, value) in \(values).enumerated() { try \(list).anyPointer(at: index).set(value) }"
             )
+        case .interface:
+            lines.append("\(indent)for (index, value) in \(values).enumerated() {")
+            lines.append(
+                "\(indent)    guard let tableIndex = value.raw.tableIndex else { throw CapabilityError.unserializableCapability }"
+            )
+            lines.append(
+                "\(indent)    try \(list).setCapability(at: index, tableIndex: tableIndex)"
+            )
+            lines.append("\(indent)}")
         case .list:
             let child = try element.elementType
             lines.append("\(indent)for (index, value) in \(values).enumerated() {")
@@ -729,11 +840,65 @@ private func buildNames(nodes: [Schema.ID: Schema.Node]) throws -> [Schema.ID: S
                 try visit(child, prefix: name)
             }
         }
+        if try node.kind == .interface {
+            for method in try node.methods {
+                let base = upperFirst(try method.name)
+                for (id, suffix) in [
+                    (try method.paramStructType, "Params"),
+                    (try method.resultStructType, "Results"),
+                ] {
+                    guard result[id] == nil, let child = nodes[id], try child.scopeID == 0 else {
+                        continue
+                    }
+                    let component = swiftIdentifier(base + suffix)
+                    let name = prefix.isEmpty ? component : prefix + "." + component
+                    result[id] = name
+                    try visit(child, prefix: name)
+                }
+            }
+        }
     }
     for node in nodes.values where try node.kind == .file {
         try visit(node, prefix: "")
     }
     return result
+}
+
+private func methodTypeName(_ id: Schema.ID, names: [Schema.ID: String]) throws -> String {
+    guard let name = names[id] else { throw SwiftGeneratorError.missingNode(id) }
+    return name
+}
+
+private func fileNeedsRPC(_ file: Schema.Node, nodes: [Schema.ID: Schema.Node]) throws -> Bool {
+    func typeNeedsRPC(_ type: Schema.`Type`) throws -> Bool {
+        if try type.kind == .interface { return true }
+        if try type.kind == .list { return try typeNeedsRPC(type.elementType) }
+        return false
+    }
+
+    func declarationNeedsRPC(_ node: Schema.Node) throws -> Bool {
+        if try node.kind == .interface { return true }
+        if try node.kind == .struct {
+            for field in try node.fields {
+                switch try field.kind {
+                case .slot:
+                    if try typeNeedsRPC(field.type) { return true }
+                case .group:
+                    guard let group = nodes[try field.groupTypeID] else {
+                        throw SwiftGeneratorError.missingNode(try field.groupTypeID)
+                    }
+                    if try declarationNeedsRPC(group) { return true }
+                case .unknown: break
+                }
+            }
+        }
+        for nested in try node.nestedNodes {
+            if let child = nodes[try nested.id], try declarationNeedsRPC(child) { return true }
+        }
+        return false
+    }
+
+    return try declarationNeedsRPC(file)
 }
 
 private struct UnionStorage {
@@ -1028,7 +1193,8 @@ private func upperFirst(_ value: String) -> String {
 }
 
 public func swiftIdentifier(_ source: String) -> String {
-    swiftKeywords.contains(source) ? "`\(source)`" : source
+    if source == "Type" { return "Type_" }
+    return swiftKeywords.contains(source) ? "`\(source)`" : source
 }
 
 private func outputPath(for source: String) throws -> String {

@@ -31,7 +31,7 @@ let package = Package(
         ),
         .target(
             name: "CapnProtoGeneratedFixtures",
-            dependencies: ["CapnProto"],
+            dependencies: ["CapnProto", "CapnProtoRPC"],
             path: "Tests/Generated/CompilerFixtures"
         ),
         .target(
@@ -72,6 +72,7 @@ let package = Package(
             name: "CapnProtoCompilerTests",
             dependencies: [
                 "CapnProtoCompiler", "CapnProtoConformance", "CapnProtoGeneratedFixtures",
+                "CapnProtoRPC",
             ],
             resources: [.copy("Fixtures")]
         ),

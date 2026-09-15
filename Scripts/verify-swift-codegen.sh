@@ -14,6 +14,7 @@ trap 'rm -rf "$work"' EXIT
 
 cd "$root"
 swift build --product capnpc-swift
+swift build --target CapnProtoRPC
 
 inputs="$work/schema inputs"
 first="$work/first output"
@@ -24,7 +25,8 @@ cp "$fixtures"/*.capnp "$inputs/"
 generate() {
   local destination="$1"
   "$capnp" compile -o"$tool:$destination" --src-prefix="$inputs" \
-    "$inputs/keywords.capnp" "$inputs/import-user.capnp" "$inputs/advanced.capnp"
+    "$inputs/keywords.capnp" "$inputs/import-user.capnp" "$inputs/advanced.capnp" \
+    "$inputs/interfaces.capnp"
   "$capnp" compile -o"$tool:$destination" --src-prefix="$inputs" \
     "$inputs/import-base.capnp"
   "$capnp" compile -o"$tool:$destination" --src-prefix="$stock" \
@@ -36,9 +38,12 @@ generate "$second"
 diff -ru "$first" "$second"
 swift format --in-place --configuration "$root/.swift-format" "$first/test.capnp.swift"
 swift format --in-place --configuration "$root/.swift-format" "$first/advanced.capnp.swift"
+swift format --in-place --configuration "$root/.swift-format" "$first/interfaces.capnp.swift"
 diff -u "$root/Tests/Generated/CapnpTest/test.capnp.swift" "$first/test.capnp.swift"
 diff -u "$root/Tests/Generated/CompilerFixtures/advanced.capnp.swift" \
   "$first/advanced.capnp.swift"
+diff -u "$root/Tests/Generated/CompilerFixtures/interfaces.capnp.swift" \
+  "$first/interfaces.capnp.swift"
 
 consumer="$work/clean consumer"
 mkdir -p "$consumer/Sources/Generated"
@@ -55,7 +60,10 @@ let package = Package(
     targets: [
         .target(
             name: "Generated",
-            dependencies: [.product(name: "CapnProto", package: "swift-capnproto")])
+            dependencies: [
+                .product(name: "CapnProto", package: "swift-capnproto"),
+                .product(name: "CapnProtoRPC", package: "swift-capnproto")
+            ])
     ],
     swiftLanguageModes: [.v6]
 )
@@ -75,4 +83,17 @@ diff -ru "$upstream_first" "$upstream_second"
 swiftc -typecheck -swift-version 6 -I "$root/.build/debug/Modules" \
   "$upstream_first/test.capnp.swift"
 
-echo "local and upstream Swift generation is deterministic and compiles with strict concurrency"
+interfaces_first="$work/interfaces first"
+interfaces_second="$work/interfaces second"
+mkdir -p "$interfaces_first" "$interfaces_second"
+"$capnp" compile --no-standard-import -I"$upstream_import_root" \
+  -o"$tool:$interfaces_first" --src-prefix="$upstream" \
+  "$upstream/rpc.capnp" "$upstream/rpc-twoparty.capnp"
+"$capnp" compile --no-standard-import -I"$upstream_import_root" \
+  -o"$tool:$interfaces_second" --src-prefix="$upstream" \
+  "$upstream/rpc.capnp" "$upstream/rpc-twoparty.capnp"
+diff -ru "$interfaces_first" "$interfaces_second"
+swiftc -typecheck -swift-version 6 -I "$root/.build/debug/Modules" \
+  "$interfaces_first/rpc.capnp.swift" "$interfaces_first/rpc-twoparty.capnp.swift"
+
+echo "local, test, RPC, and two-party generation is deterministic and strict-Swift-6 clean"

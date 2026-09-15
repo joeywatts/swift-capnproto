@@ -324,6 +324,15 @@ public struct AnyPointerReader {
     public func asList() throws -> ListReader { try pointer.asList(depth: depth) }
     public func asText() throws -> TextReader { TextReader(data: DataReader(list: try asList())) }
     public func asData() throws -> DataReader { DataReader(list: try asList()) }
+    public var capabilityTableIndex: UInt32 {
+        get throws {
+            guard !pointer.isNull, pointer.kind == 3 else {
+                throw CapnProtoError.typeMismatch(
+                    expected: "capability", actual: pointerKindName(pointer.kind))
+            }
+            return UInt32(truncatingIfNeeded: pointer.raw >> 32)
+        }
+    }
 }
 
 public protocol CapnProtoPointerType {

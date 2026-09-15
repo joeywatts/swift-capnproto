@@ -32,3 +32,16 @@ Scripts/generate-advanced-swift.sh
 `Scripts/verify-swift-codegen.sh` separately checks deterministic regeneration,
 clean-package compilation, and strict Swift 6 typechecking of the complete
 pinned upstream `test.capnp` schema.
+
+## Capability interfaces
+
+Generated interfaces contain a `Client`, an inheritable `Server` protocol, and
+stable `CapabilityMethodDescriptor` values. Anonymous parameter and result
+structs are emitted as nested types. Streaming methods return `Void` from the
+client and omit a results builder from the server signature; their descriptor's
+`isStreaming` flag remains available to dispatch code.
+
+`CapabilityClient` delegates calls to an application- or RPC-runtime-provided
+`CapabilityCallTarget`. Capability fields and lists accept clients backed by a
+capability-table index. Network dispatch and capability-table ownership are RPC
+runtime responsibilities implemented in later roadmap milestones.

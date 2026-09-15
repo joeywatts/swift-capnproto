@@ -2,6 +2,7 @@ import CapnProto
 import CapnProtoCompiler
 import CapnProtoConformance
 import CapnProtoGeneratedFixtures
+import CapnProtoRPC
 import CapnProtoSchema
 import Foundation
 import Testing
@@ -16,7 +17,7 @@ import Testing
     let keywords = try #require(first.first?.contents)
     #expect(keywords.contains("public enum `Any`"))
     #expect(keywords.contains("    public enum `Protocol`"))
-    #expect(keywords.contains("public struct `Type`"))
+    #expect(keywords.contains("public struct Type_"))
     #expect(!first.map(\.path).contains("import-base.capnp.swift"))
 }
 
@@ -111,10 +112,75 @@ import Testing
     #expect(try Branded.Reader(brandedMessage.asReader().rootStruct()).textBox.nestedList == [[9]])
 }
 
-@Test(arguments: ["actor", "protocol", "extension", "repeat", "ordinaryName"])
+@Test(arguments: ["actor", "protocol", "extension", "repeat", "ordinaryName", "Type"])
 func identifierEscaping(_ name: String) {
     let result = swiftIdentifier(name)
-    #expect(result == (name == "ordinaryName" ? name : "`\(name)`"))
+    let expected = name == "ordinaryName" ? name : (name == "Type" ? "Type_" : "`\(name)`")
+    #expect(result == expected)
+}
+
+// API-shape coverage for capability-test.c++ and rpc-test.c++ at upstream
+// commit 3a82de9b39736a2625f03c93b2b7c50642dd5b25.
+@Test func generatedInterfacesExposeClientsServersInheritanceAndStreaming() async throws {
+    #expect(Base.Methods.ping.interfaceID == Base.schemaID)
+    #expect(Base.Methods.ping.methodID == 0)
+    #expect(!Base.Methods.ping.isStreaming)
+    #expect(Child.superclassIDs == [Base.schemaID])
+    #expect(Child.Methods.call.methodID == 0)
+    #expect(Child.Methods.streamIt.methodID == 1)
+    #expect(Child.Methods.streamIt.isStreaming)
+
+    let paramsMessage = try MessageBuilder()
+    let params = try Base.PingParams.initRoot(in: paramsMessage)
+    try params.setValue(123)
+    let client = Base.Client(CapabilityClient(target: GeneratedCallTarget()))
+    let response = try await client.ping(
+        Base.PingParams.Reader(try paramsMessage.asReader().rootStruct()))
+    #expect(try response.text == "response 123")
+
+    let _: any Child.Server = GeneratedChildServer()
+    let holderMessage = try MessageBuilder()
+    let holderBuilder = try CapabilityHolder.initRoot(in: holderMessage)
+    let serializedClient = Child.Client(CapabilityClient(tableIndex: 7))
+    try holderBuilder.setService(serializedClient)
+    try holderBuilder.setServices([serializedClient, Child.Client(CapabilityClient(tableIndex: 9))])
+    let holder = CapabilityHolder.Reader(try holderMessage.asReader().rootStruct())
+    #expect(try holder.hasService)
+    #expect(try holder.service.raw.tableIndex == 7)
+    #expect(try holder.services.map(\.raw.tableIndex) == [7, 9])
+}
+
+@Test func sourceLocatedGeneratorErrorsHaveStableDiagnostics() {
+    let error = SwiftGeneratorError.sourceLocated(
+        source: "broken.capnp", startByte: 12, endByte: 19, detail: "node discriminant 99")
+    #expect(error.description == "broken.capnp:bytes 12-19: node discriminant 99")
+}
+
+private final class GeneratedCallTarget: CapabilityCallTarget {
+    func call(_ method: CapabilityMethodDescriptor, params: StructReader) async throws
+        -> StructReader
+    {
+        #expect(method == Base.Methods.ping)
+        let value = try Base.PingParams.Reader(params).value
+        let message = try MessageBuilder()
+        let result = try Base.PingResults.initRoot(in: message)
+        try result.setText("response \(value)")
+        return try message.asReader().rootStruct()
+    }
+}
+
+private struct GeneratedChildServer: Child.Server {
+    func ping(_ params: Base.PingParams.Reader, results: Base.PingResults.Builder) async throws {
+        try results.setText("\(try params.value)")
+    }
+
+    func call(_ params: Child.CallParams.Reader, results: Child.CallResults.Builder) async throws {
+        try results.setResponse(try params.request)
+    }
+
+    func streamIt(_ params: Child.StreamItParams.Reader) async throws {
+        _ = try params.chunk
+    }
 }
 
 private func loadRequest(_ name: String) throws -> Schema.CodeGeneratorRequest {

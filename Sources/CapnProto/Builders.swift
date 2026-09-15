@@ -208,6 +208,13 @@ public struct StructBuilder {
             pointerIndex: pointer)
     }
 
+    public func setCapabilityField(at index: Int, tableIndex: UInt32) throws {
+        let pointer = try pointerIndex(index)
+        try arena.clearPointerGraph(segment: segment, pointerIndex: pointer)
+        try arena.setWord(
+            UInt64(3) | UInt64(tableIndex) << 32, segment: segment, index: pointer)
+    }
+
     public func anyPointerField(at index: Int) throws -> AnyPointerBuilder {
         AnyPointerBuilder(
             arena: arena, segment: segment, pointerIndex: try pointerIndex(index))
@@ -407,6 +414,13 @@ public struct ListBuilder {
 
     public func setFloat64(at index: Int, to value: Double) throws {
         try setInteger(at: index, to: value.bitPattern)
+    }
+
+    public func setCapability(at index: Int, tableIndex: UInt32) throws {
+        let pointer = try elementPointerIndex(index)
+        try arena.clearPointerGraph(segment: segment, pointerIndex: pointer)
+        try arena.setWord(
+            UInt64(3) | UInt64(tableIndex) << 32, segment: segment, index: pointer)
     }
 
     public func initList(

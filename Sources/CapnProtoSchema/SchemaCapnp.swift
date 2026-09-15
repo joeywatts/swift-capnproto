@@ -262,6 +262,9 @@ public enum Schema {
         public var codeOrder: UInt16 { get throws { try value.integer(atByte: 0) } }
         public var paramStructType: ID { get throws { try value.integer(atByte: 8) } }
         public var resultStructType: ID { get throws { try value.integer(atByte: 16) } }
+        public var isStreaming: Bool {
+            get throws { try resultStructType == 0x995f_9a33_77c0_b16e }
+        }
     }
 
     public struct Superclass {
