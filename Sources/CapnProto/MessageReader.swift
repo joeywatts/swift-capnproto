@@ -107,6 +107,10 @@ public struct MessageReader {
         }
         return TextReader(data: data)
     }
+
+    func rootPointer() throws -> ResolvedPointer {
+        try resolvePointer(state: state, segment: 0, pointerIndex: 0)
+    }
 }
 
 public struct SegmentReader {

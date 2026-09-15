@@ -1,6 +1,6 @@
 import Foundation
 
-private enum PointerValue {
+enum PointerValue {
     case `struct`(dataWords: Int, pointerWords: Int)
     case list(size: ListElementSize, countOrWords: Int)
 
@@ -23,13 +23,13 @@ private enum PointerValue {
     }
 }
 
-private struct ObjectAllocation {
+struct ObjectAllocation {
     let allocation: SegmentAllocation
     let objectStart: Int
 }
 
 extension BuilderArena {
-    fileprivate func allocateObject(
+    func allocateObject(
         words: Int, fromPointerIn pointerSegment: Int, at pointerIndex: Int,
         pointerValue: PointerValue
     ) throws -> ObjectAllocation {
@@ -58,6 +58,19 @@ extension BuilderArena {
 }
 
 extension MessageBuilder {
+    public func setRoot(copying source: StructReader) throws -> StructBuilder {
+        try arena.setWord(0, segment: 0, index: 0)
+        try copyPointerGraph(
+            source: .structReader(source), to: arena, pointerSegment: 0, pointerIndex: 0)
+        return try asReader().rootStruct().builderCopy(in: arena)
+    }
+
+    public func setRoot(copying source: ListReader) throws {
+        try arena.setWord(0, segment: 0, index: 0)
+        try copyPointerGraph(
+            source: .listReader(source), to: arena, pointerSegment: 0, pointerIndex: 0)
+    }
+
     public func initRootStruct(dataWords: Int, pointerCount: Int) throws -> StructBuilder {
         try validateStructSize(dataWords: dataWords, pointerCount: pointerCount)
         try arena.setWord(0, segment: 0, index: 0)
@@ -170,7 +183,42 @@ public struct StructBuilder {
     }
 
     public func clearPointer(at index: Int) throws {
-        try arena.setWord(0, segment: segment, index: try pointerIndex(index))
+        try arena.clearPointerGraph(segment: segment, pointerIndex: try pointerIndex(index))
+    }
+
+    public func setStructField(at index: Int, copying source: StructReader) throws {
+        let pointer = try pointerIndex(index)
+        try arena.clearPointerGraph(segment: segment, pointerIndex: pointer)
+        try copyPointerGraph(
+            source: .structReader(source), to: arena, pointerSegment: segment,
+            pointerIndex: pointer)
+    }
+
+    public func setListField(at index: Int, copying source: ListReader) throws {
+        let pointer = try pointerIndex(index)
+        try arena.clearPointerGraph(segment: segment, pointerIndex: pointer)
+        try copyPointerGraph(
+            source: .listReader(source), to: arena, pointerSegment: segment,
+            pointerIndex: pointer)
+    }
+
+    public func disownPointer(at index: Int) throws -> Orphan {
+        let pointer = try pointerIndex(index)
+        let state = ReaderState(segments: arena.outputSegments, options: ReaderOptions())
+        let resolved = try resolvePointer(state: state, segment: segment, pointerIndex: pointer)
+        try arena.setWord(0, segment: segment, index: pointer)
+        return Orphan(arena: arena, source: resolved)
+    }
+
+    public func adopt(_ orphan: Orphan, at index: Int) throws {
+        guard orphan.arena === arena else { throw CapnProtoError.orphanArenaMismatch }
+        guard !orphan.consumed else { throw CapnProtoError.orphanAlreadyAdopted }
+        let pointer = try pointerIndex(index)
+        try arena.clearPointerGraph(segment: segment, pointerIndex: pointer)
+        try copyPointerGraph(
+            source: .resolved(orphan.source), to: arena, pointerSegment: segment,
+            pointerIndex: pointer)
+        orphan.consumed = true
     }
 
     public func clearData(inByteRange range: Range<Int>) throws {

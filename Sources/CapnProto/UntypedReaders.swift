@@ -98,7 +98,7 @@ public struct StructReader {
         return TextReader(data: data)
     }
 
-    private func pointer(at index: Int) throws -> ResolvedPointer {
+    func pointer(at index: Int) throws -> ResolvedPointer {
         guard index >= 0 else {
             throw CapnProtoError.indexOutOfBounds(index: index, count: pointerCount)
         }
@@ -253,7 +253,7 @@ public struct ListReader {
         return try LittleEndian.loadInteger(T.self, from: state.segments[segment], at: absolute)
     }
 
-    private func pointer(at index: Int) throws -> ResolvedPointer {
+    func pointer(at index: Int) throws -> ResolvedPointer {
         try checkIndex(index)
         if elementSize == .inlineComposite {
             guard pointerWordsPerElement > 0 else {

@@ -12,6 +12,8 @@ public enum CapnProtoError: Error, Equatable, CustomStringConvertible {
     case typeMismatch(expected: String, actual: String)
     case indexOutOfBounds(index: Int, count: Int)
     case invalidText
+    case orphanArenaMismatch
+    case orphanAlreadyAdopted
 
     public var description: String {
         switch self {
@@ -29,6 +31,8 @@ public enum CapnProtoError: Error, Equatable, CustomStringConvertible {
         case let .typeMismatch(expected, actual): "expected \(expected), got \(actual)"
         case let .indexOutOfBounds(index, count): "index \(index) is outside 0..<\(count)"
         case .invalidText: "text is not NUL-terminated"
+        case .orphanArenaMismatch: "orphan belongs to a different message arena"
+        case .orphanAlreadyAdopted: "orphan has already been adopted"
         }
     }
 }

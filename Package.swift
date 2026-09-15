@@ -5,7 +5,7 @@ import PackageDescription
 let package = Package(
     name: "swift-capnproto",
     platforms: [
-        .macOS(.v13),
+        .macOS(.v13)
     ],
     products: [
         .library(name: "CapnProto", targets: ["CapnProto"]),
@@ -48,7 +48,8 @@ let package = Package(
             path: "Benchmarks"
         ),
         .plugin(name: "CapnProtoPlugin", capability: .buildTool()),
-        .testTarget(name: "CapnProtoTests", dependencies: ["CapnProto"]),
+        .testTarget(
+            name: "CapnProtoTests", dependencies: ["CapnProto", "CapnProtoTestSupport"]),
         .testTarget(name: "CapnProtoSchemaTests", dependencies: ["CapnProtoSchema"]),
         .testTarget(name: "CapnProtoRPCTests", dependencies: ["CapnProtoRPC"]),
         .testTarget(name: "CapnProtoNIOTests", dependencies: ["CapnProtoNIO"]),
