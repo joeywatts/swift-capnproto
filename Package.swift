@@ -73,7 +73,8 @@ let package = Package(
             dependencies: ["CapnProtoSchema"],
             resources: [.copy("Fixtures")]
         ),
-        .testTarget(name: "CapnProtoRPCTests", dependencies: ["CapnProtoRPC"]),
+        .testTarget(
+            name: "CapnProtoRPCTests", dependencies: ["CapnProto", "CapnProtoRPC"]),
         .testTarget(name: "CapnProtoNIOTests", dependencies: ["CapnProtoNIO"]),
         .testTarget(
             name: "CapnProtoCompilerTests",
