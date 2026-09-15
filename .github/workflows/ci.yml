@@ -18,3 +18,4 @@ jobs:
       - run: swift build
       - run: swift test
       - run: Scripts/check-package-boundaries.sh
+      - run: Scripts/verify-upstream.sh

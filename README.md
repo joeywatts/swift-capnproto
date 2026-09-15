@@ -56,6 +56,8 @@ language-neutral [`kaos/capnp_test`](https://github.com/kaos/capnp_test)
 encode/decode contract. Lower-level behavior and RPC verification will be mapped
 to the pinned tests and schemas from the reference
 [`capnproto/capnproto`](https://github.com/capnproto/capnproto) repository.
+The exact revisions, imported sources, and feature traceability are recorded in
+`Tests/Upstream`; validate them with `Scripts/verify-upstream.sh`.
 
 ## License
 

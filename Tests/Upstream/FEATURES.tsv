@@ -1,0 +1,18 @@
+# release-blocking feature	upstream sources (comma-separated paths under capnproto/)
+standard serialization	c++/src/capnp/serialize-test.c++,c++/src/capnp/encoding-test.c++
+packed serialization	c++/src/capnp/serialize-packed-test.c++
+multi-segment messages	c++/src/capnp/layout-test.c++,c++/src/capnp/encoding-test.c++
+canonicalization	c++/src/capnp/canonicalize-test.c++
+schema evolution	c++/src/capnp/compiler/evolution-test.c++
+resource limits and untrusted input	c++/src/capnp/message-test.c++,c++/src/capnp/fuzz-test.c++
+generated readers and builders	c++/src/capnp/test.capnp,c++/src/capnp/encoding-test.c++
+enums groups unions constants and generics	c++/src/capnp/test.capnp,c++/src/capnp/encoding-test.c++
+capability interfaces	c++/src/capnp/capability-test.c++,c++/src/capnp/rpc.capnp
+dynamic schema and reflection	c++/src/capnp/schema-test.c++,c++/src/capnp/schema-loader-test.c++,c++/src/capnp/dynamic-test.c++
+compiler lexer parser resolver and type checking	c++/src/capnp/compiler/lexer-test.c++,c++/src/capnp/compiler/type-id-test.c++,c++/src/capnp/schema-parser-test.c++
+level 3 capability RPC	c++/src/capnp/rpc-test.c++,c++/src/capnp/capability-test.c++
+promise pipelining and capability passing	c++/src/capnp/rpc-test.c++
+cancellation embargo and disembargo	c++/src/capnp/rpc-test.c++
+two-party network protocol	c++/src/capnp/rpc-twoparty-test.c++,c++/src/capnp/rpc-twoparty.capnp
+compiler plugin interoperability	c++/src/capnp/schema.capnp,c++/src/capnp/test.capnp
+macOS and Linux Swift 6 support	c++/src/capnp/encoding-test.c++,c++/src/capnp/rpc-test.c++

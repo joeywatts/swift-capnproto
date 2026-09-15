@@ -1,0 +1,3 @@
+# Immutable upstream revisions used by conformance tests and fixture generation.
+CAPNPROTO_REV=3a82de9b39736a2625f03c93b2b7c50642dd5b25
+CAPNP_TEST_REV=9aad1331857d2b02158cffdba4d664f71f7f81de
