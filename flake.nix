@@ -26,6 +26,7 @@
                 capnproto
                 cmake
                 git
+                jq
                 ninja
                 pkg-config
                 ripgrep

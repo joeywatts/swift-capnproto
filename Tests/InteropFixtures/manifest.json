@@ -1,0 +1,79 @@
+{
+  "formatVersion": 1,
+  "upstreamCommit": "3a82de9b39736a2625f03c93b2b7c50642dd5b25",
+  "schema": "Tests/InteropFixtures/fixture.capnp",
+  "fixtures": [
+    {
+      "name": "flat",
+      "upstreamCommit": "3a82de9b39736a2625f03c93b2b7c50642dd5b25",
+      "sourceTests": ["c++/src/capnp/encoding-test.c++"],
+      "file": "generated/flat.bin",
+      "producingCommand": "Scripts/generate-fixtures.sh",
+      "encoding": "flat",
+      "expectedSemantic": {"name":"standard","boolDefault":true,"intDefault":-123,"choice":{"label":"union"},"details":{"enabled":true,"count":7},"nested":[[1,2],[3,4,5]]}
+    },
+    {
+      "name": "stream",
+      "upstreamCommit": "3a82de9b39736a2625f03c93b2b7c50642dd5b25",
+      "sourceTests": ["c++/src/capnp/serialize-test.c++"],
+      "file": "generated/stream.bin",
+      "producingCommand": "Scripts/generate-fixtures.sh",
+      "encoding": "stream",
+      "expectedSemantic": {"name":"standard","boolDefault":true,"intDefault":-123,"choice":{"label":"union"},"details":{"enabled":true,"count":7},"nested":[[1,2],[3,4,5]]}
+    },
+    {
+      "name": "packed",
+      "upstreamCommit": "3a82de9b39736a2625f03c93b2b7c50642dd5b25",
+      "sourceTests": ["c++/src/capnp/serialize-packed-test.c++"],
+      "file": "generated/packed.bin",
+      "producingCommand": "Scripts/generate-fixtures.sh",
+      "encoding": "packed",
+      "expectedSemantic": {"name":"standard","boolDefault":true,"intDefault":-123,"choice":{"label":"union"},"details":{"enabled":true,"count":7},"nested":[[1,2],[3,4,5]]}
+    },
+    {
+      "name": "multi-segment",
+      "upstreamCommit": "3a82de9b39736a2625f03c93b2b7c50642dd5b25",
+      "sourceTests": ["c++/src/capnp/encoding-test.c++"],
+      "file": "generated/multi-segment.bin",
+      "producingCommand": "Scripts/generate-fixtures.sh",
+      "encoding": "stream",
+      "expectedSemantic": {"name":"multi-segment-padding-for-a-second-allocation","boolDefault":true,"intDefault":-123,"choice":{"label":"union"},"details":{"enabled":true,"count":7},"nested":[[1,2],[3,4,5]]}
+    },
+    {
+      "name": "defaults",
+      "upstreamCommit": "3a82de9b39736a2625f03c93b2b7c50642dd5b25",
+      "sourceTests": ["c++/src/capnp/encoding-test.c++"],
+      "file": "generated/defaults.bin",
+      "producingCommand": "Scripts/generate-fixtures.sh",
+      "encoding": "stream",
+      "expectedSemantic": {"name":"","boolDefault":true,"intDefault":-123,"choice":{"number":0},"details":{"enabled":false,"count":0},"nested":[]}
+    },
+    {
+      "name": "union",
+      "upstreamCommit": "3a82de9b39736a2625f03c93b2b7c50642dd5b25",
+      "sourceTests": ["c++/src/capnp/encoding-test.c++"],
+      "file": "generated/union.bin",
+      "producingCommand": "Scripts/generate-fixtures.sh",
+      "encoding": "stream",
+      "expectedSemantic": {"name":"union","boolDefault":true,"intDefault":-123,"choice":{"number":42},"details":{"enabled":false,"count":0},"nested":[]}
+    },
+    {
+      "name": "group",
+      "upstreamCommit": "3a82de9b39736a2625f03c93b2b7c50642dd5b25",
+      "sourceTests": ["c++/src/capnp/encoding-test.c++"],
+      "file": "generated/group.bin",
+      "producingCommand": "Scripts/generate-fixtures.sh",
+      "encoding": "stream",
+      "expectedSemantic": {"name":"group","boolDefault":true,"intDefault":-123,"choice":{"number":0},"details":{"enabled":true,"count":99},"nested":[]}
+    },
+    {
+      "name": "nested-list",
+      "upstreamCommit": "3a82de9b39736a2625f03c93b2b7c50642dd5b25",
+      "sourceTests": ["c++/src/capnp/encoding-test.c++"],
+      "file": "generated/nested-list.bin",
+      "producingCommand": "Scripts/generate-fixtures.sh",
+      "encoding": "stream",
+      "expectedSemantic": {"name":"nested-list","boolDefault":true,"intDefault":-123,"choice":{"number":0},"details":{"enabled":false,"count":0},"nested":[[10],[20,30]]}
+    }
+  ]
+}
