@@ -27,6 +27,14 @@ and preservation of unknown enum and union discriminant values as raw integers.
 
 The reader copies its segment inputs and validates all targets before access.
 Malformed inputs report deterministic `CapnProtoError` values and are bounded by
-configurable traversal-word and nesting limits. Stream framing, packed encoding,
-builders, generated types, schemas, and RPC remain scheduled for later
-milestones.
+configurable traversal-word and nesting limits.
+
+Untyped builders support arena allocation, scalar/default-XOR fields, blobs,
+primitive and composite lists, nested values, unions/groups, graph copy, and
+same-arena orphan adoption. Standard stream framing supports scatter/gather,
+concatenated and partial reads, and asynchronous byte chunks. Packed encoding is
+incremental and expansion-bounded. Canonicalization emits one dense segment in
+pointer preorder, truncates zero-valued struct sections, normalizes list padding,
+and validates canonical form by exact bytes. These paths are cross-checked with
+the pinned C++ oracle. Generated types, schemas, and RPC remain scheduled for
+later milestones.

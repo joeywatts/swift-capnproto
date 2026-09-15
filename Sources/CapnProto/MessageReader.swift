@@ -58,7 +58,7 @@ final class ReaderState {
 }
 
 public struct MessageReader {
-    private let state: ReaderState
+    let state: ReaderState
 
     /// Copies segment bytes, so all returned views remain valid for the reader's lifetime.
     public init(segments: [[UInt8]], options: ReaderOptions = ReaderOptions()) throws {

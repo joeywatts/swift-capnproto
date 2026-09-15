@@ -35,7 +35,13 @@ extension BuilderArena {
     ) throws -> ObjectAllocation {
         if words <= segments[pointerSegment].capacityWords - segments[pointerSegment].usedWords {
             let allocation = try allocate(words: words, preferredSegment: pointerSegment)
-            let offset = try checkedAdd(allocation.startWord, -pointerIndex - 1)
+            let calculatedOffset = try checkedAdd(allocation.startWord, -pointerIndex - 1)
+            let offset: Int
+            if case .struct(dataWords: 0, pointerWords: 0) = pointerValue {
+                offset = -1
+            } else {
+                offset = calculatedOffset
+            }
             try setWord(
                 try pointerValue.word(offset: offset), segment: pointerSegment, index: pointerIndex)
             return ObjectAllocation(allocation: allocation, objectStart: allocation.startWord)

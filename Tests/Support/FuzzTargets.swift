@@ -44,6 +44,7 @@ public enum MessageFuzzTarget {
         if let reader = try? MessageReader(segments: segments), !segments[0].isEmpty {
             _ = try? reader.rootStruct()
             _ = try? reader.rootList()
+            _ = try? reader.canonicalized()
         }
         return .accepted
     }
