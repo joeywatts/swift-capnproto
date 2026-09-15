@@ -17,6 +17,8 @@ public enum CapnProtoError: Error, Equatable, CustomStringConvertible {
     case invalidFrame
     case incompleteFrame
     case frameTooLarge
+    case invalidPackedData
+    case packedOutputLimitExceeded
 
     public var description: String {
         switch self {
@@ -39,6 +41,8 @@ public enum CapnProtoError: Error, Equatable, CustomStringConvertible {
         case .invalidFrame: "invalid stream frame"
         case .incompleteFrame: "incomplete stream frame"
         case .frameTooLarge: "stream frame exceeds configured limits"
+        case .invalidPackedData: "invalid or truncated packed data"
+        case .packedOutputLimitExceeded: "packed data exceeds the output limit"
         }
     }
 }
