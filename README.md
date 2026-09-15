@@ -47,6 +47,8 @@ The normal validation entry points are:
 ```sh
 swift test
 Scripts/check-package-boundaries.sh
+Scripts/verify-fuzz-targets.sh
+Scripts/run-benchmarks.sh
 ```
 
 ## Compatibility testing

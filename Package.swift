@@ -24,15 +24,36 @@ let package = Package(
         .target(name: "CapnProtoRPC", dependencies: ["CapnProto", "CapnProtoSchema"]),
         .target(name: "CapnProtoNIO", dependencies: ["CapnProtoRPC"]),
         .target(name: "CapnProtoCompiler", dependencies: ["CapnProto", "CapnProtoSchema"]),
+        .target(
+            name: "CapnProtoTestSupport",
+            dependencies: ["CapnProto"],
+            path: "Tests/Support"
+        ),
         .executableTarget(name: "capnpc-swift", dependencies: ["CapnProtoCompiler"]),
         .executableTarget(name: "capnp-swift", dependencies: ["CapnProtoCompiler"]),
         .executableTarget(name: "capnp-test-swift", dependencies: ["CapnProto"]),
+        .executableTarget(
+            name: "capnp-fuzz-message",
+            dependencies: ["CapnProtoTestSupport"],
+            path: "Fuzz/Message"
+        ),
+        .executableTarget(
+            name: "capnp-fuzz-packed",
+            dependencies: ["CapnProtoTestSupport"],
+            path: "Fuzz/Packed"
+        ),
+        .executableTarget(
+            name: "capnp-benchmark",
+            dependencies: ["CapnProtoTestSupport"],
+            path: "Benchmarks"
+        ),
         .plugin(name: "CapnProtoPlugin", capability: .buildTool()),
         .testTarget(name: "CapnProtoTests", dependencies: ["CapnProto"]),
         .testTarget(name: "CapnProtoSchemaTests", dependencies: ["CapnProtoSchema"]),
         .testTarget(name: "CapnProtoRPCTests", dependencies: ["CapnProtoRPC"]),
         .testTarget(name: "CapnProtoNIOTests", dependencies: ["CapnProtoNIO"]),
         .testTarget(name: "CapnProtoCompilerTests", dependencies: ["CapnProtoCompiler"]),
+        .testTarget(name: "CapnProtoTestSupportTests", dependencies: ["CapnProtoTestSupport"]),
     ],
     swiftLanguageModes: [.v6]
 )

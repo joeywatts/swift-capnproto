@@ -16,8 +16,12 @@ jobs:
         with:
           swift-version: "6.0"
       - run: swift build
+      - run: swift format lint --recursive --strict Sources Tests/Support Tests/*Tests Fuzz Benchmarks Plugins
       - run: swift test
+      - run: swift test --sanitize=address
       - run: Scripts/check-package-boundaries.sh
       - run: Scripts/verify-upstream.sh
       - run: Scripts/verify-capnp-test.sh
       - run: Scripts/verify-fixtures.sh
+      - run: Scripts/verify-fuzz-targets.sh
+      - run: Scripts/run-benchmarks.sh
