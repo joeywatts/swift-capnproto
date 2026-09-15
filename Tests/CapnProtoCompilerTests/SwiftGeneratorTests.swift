@@ -139,6 +139,31 @@ func identifierEscaping(_ name: String) {
     #expect(try response.text == "response 123")
 
     let _: any Child.Server = GeneratedChildServer()
+    let local = Child.client(GeneratedChildServer())
+    let requestMessage = try MessageBuilder()
+    let requestBuilder = try Advanced.initRoot(in: requestMessage)
+    try requestBuilder.setNumber(77)
+    let request = Advanced.Reader(try requestMessage.asReader().rootStruct())
+    let callMessage = try MessageBuilder()
+    let callParams = try Child.CallParams.initRoot(in: callMessage)
+    try callParams.setRequest(request)
+    let callResult = try await local.call(
+        Child.CallParams.Reader(try callMessage.asReader().rootStruct()))
+    #expect(try callResult.response.number == 77)
+
+    let inheritedMessage = try MessageBuilder()
+    let inheritedParams = try Base.PingParams.initRoot(in: inheritedMessage)
+    try inheritedParams.setValue(321)
+    let inheritedResult = try await local.asBase.ping(
+        Base.PingParams.Reader(try inheritedMessage.asReader().rootStruct()))
+    #expect(try inheritedResult.text == "321")
+
+    let streamMessage = try MessageBuilder()
+    let streamParams = try Child.StreamItParams.initRoot(in: streamMessage)
+    try streamParams.setChunk([1, 2, 3])
+    try await local.streamIt(
+        Child.StreamItParams.Reader(try streamMessage.asReader().rootStruct()))
+
     let holderMessage = try MessageBuilder()
     let holderBuilder = try CapabilityHolder.initRoot(in: holderMessage)
     let serializedClient = Child.Client(CapabilityClient(tableIndex: 7))

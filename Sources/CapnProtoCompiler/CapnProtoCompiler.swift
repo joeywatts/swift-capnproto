@@ -180,6 +180,16 @@ public struct SwiftGenerator {
                 )
             }
         }
+        for superclass in superclasses {
+            guard let inheritedName = names[try superclass.id] else {
+                throw SwiftGeneratorError.missingNode(try superclass.id)
+            }
+            let shortName =
+                inheritedName.split(separator: ".").last.map(String.init) ?? inheritedName
+            lines.append(
+                "\(indent)        public var as\(upperFirst(shortName)): \(inheritedName).Client { \(inheritedName).Client(raw) }"
+            )
+        }
         lines.append("\(indent)    }")
         lines.append("")
         let inherited = try superclasses.map {
@@ -203,6 +213,62 @@ public struct SwiftGenerator {
                 )
             }
         }
+        lines.append("\(indent)    }")
+        lines.append("")
+        let allInterfaceIDs = [String(interfaceID)] + (try superclasses.map { String(try $0.id) })
+        lines.append("\(indent)    public static func client(_ server: any Server) -> Client {")
+        lines.append(
+            "\(indent)        Client(CapabilityClient(target: LocalCapabilityTarget(interfaceIDs: Set([\(allInterfaceIDs.joined(separator: ", "))])) { context in"
+        )
+        lines.append("\(indent)            try await dispatch(server, context: context)")
+        lines.append("\(indent)        }))")
+        lines.append("\(indent)    }")
+        lines.append("")
+        lines.append(
+            "\(indent)    public static func dispatch(_ server: any Server, context: CapabilityRequestContext) async throws -> StructReader {"
+        )
+        lines.append(
+            "\(indent)        switch (context.method.interfaceID, context.method.methodID) {")
+        for (methodID, method) in methods.enumerated() {
+            let methodName = swiftIdentifier(try method.name)
+            let params = try methodTypeName(method.paramStructType, names: names)
+            let results = try methodTypeName(method.resultStructType, names: names)
+            guard let resultNode = nodes[try method.resultStructType] else {
+                throw SwiftGeneratorError.missingNode(try method.resultStructType)
+            }
+            lines.append("\(indent)        case (schemaID, \(methodID)):")
+            lines.append("\(indent)            try context.throwIfCancelled()")
+            lines.append(
+                "\(indent)            let response = try CapabilityResponseContext(dataWords: \(try resultNode.dataWordCount), pointerCount: \(try resultNode.pointerCount))"
+            )
+            if try method.isStreaming {
+                lines.append(
+                    "\(indent)            try await server.\(methodName)(\(params).Reader(context.params))"
+                )
+            } else {
+                lines.append(
+                    "\(indent)            let result = \(results).Builder(response.results)"
+                )
+                lines.append(
+                    "\(indent)            try await server.\(methodName)(\(params).Reader(context.params), results: result)"
+                )
+            }
+            lines.append("\(indent)            return try response.finish()")
+        }
+        for superclass in superclasses {
+            guard let inheritedName = names[try superclass.id] else {
+                throw SwiftGeneratorError.missingNode(try superclass.id)
+            }
+            lines.append("\(indent)        case (\(inheritedName).schemaID, _):")
+            lines.append(
+                "\(indent)            return try await \(inheritedName).dispatch(server, context: context)"
+            )
+        }
+        lines.append("\(indent)        default:")
+        lines.append(
+            "\(indent)            throw CapabilityError.unknownMethod(interfaceID: context.method.interfaceID, methodID: context.method.methodID)"
+        )
+        lines.append("\(indent)        }")
         lines.append("\(indent)    }")
         lines.append("")
         lines.append("\(indent)    public enum Methods {")

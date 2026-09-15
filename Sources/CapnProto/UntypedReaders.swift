@@ -1,6 +1,6 @@
 import Foundation
 
-public struct StructReader {
+public struct StructReader: Sendable {
     let state: ReaderState
     let segment: Int
     let dataBitStart: Int

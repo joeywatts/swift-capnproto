@@ -1,3 +1,5 @@
+import Foundation
+
 public struct ReaderOptions: Equatable, Sendable {
     public var traversalLimitInWords: Int
     public var nestingLimit: Int
@@ -8,10 +10,11 @@ public struct ReaderOptions: Equatable, Sendable {
     }
 }
 
-final class ReaderState {
+final class ReaderState: @unchecked Sendable {
     let segments: [[UInt8]]
     let options: ReaderOptions
-    var traversedWords = 0
+    private let traversalLock = NSLock()
+    private var traversedWords = 0
 
     init(segments: [[UInt8]], options: ReaderOptions) {
         self.segments = segments
@@ -49,15 +52,17 @@ final class ReaderState {
     }
 
     func charge(words: Int) throws {
-        let next = try checkedAdd(traversedWords, words)
-        guard next <= options.traversalLimitInWords else {
-            throw CapnProtoError.traversalLimitExceeded
+        try traversalLock.withLock {
+            let next = try checkedAdd(traversedWords, words)
+            guard next <= options.traversalLimitInWords else {
+                throw CapnProtoError.traversalLimitExceeded
+            }
+            traversedWords = next
         }
-        traversedWords = next
     }
 }
 
-public struct MessageReader {
+public struct MessageReader: Sendable {
     let state: ReaderState
 
     /// Copies segment bytes, so all returned views remain valid for the reader's lifetime.

@@ -1,9 +1,9 @@
 import CapnProto
 import CapnProtoSchema
 
-/// Namespace for capability RPC support.
+/// Namespace for the capability and transport-independent RPC runtime.
 public enum CapnProtoRPCRuntime {
-    public static let isImplemented = false
+    public static let isImplemented = true
 }
 
 public struct CapabilityMethodDescriptor: Equatable, Hashable, Sendable {
@@ -27,13 +27,115 @@ public struct CapabilityMethodDescriptor: Equatable, Hashable, Sendable {
     }
 }
 
+/// A wire-compatible exception classification. The description is safe to forward
+/// to another vat; `detail` is deliberately kept separate for local diagnostics.
+public struct RemoteException: Error, Equatable, Sendable, CustomStringConvertible {
+    public enum Kind: UInt8, Equatable, Sendable {
+        case failed
+        case overloaded
+        case disconnected
+        case unimplemented
+    }
+
+    public let kind: Kind
+    public let reason: String
+    public let detail: String?
+
+    public init(kind: Kind, reason: String, detail: String? = nil) {
+        self.kind = kind
+        self.reason = reason
+        self.detail = detail
+    }
+
+    public var description: String { reason }
+}
+
+public enum CapabilityError: Error, Equatable, Sendable {
+    case unavailableSerializedCapability
+    case unserializableCapability
+    case nullCapability
+    case broken(RemoteException)
+    case unsupportedInterface(UInt64)
+    case unknownMethod(interfaceID: UInt64, methodID: UInt16)
+    case promiseAlreadyResolved
+    case promiseResolutionLoop
+    case cancelled
+}
+
+/// Type-erased call target used by generated clients and the wire RPC layer.
 public protocol CapabilityCallTarget: AnyObject {
     func call(_ method: CapabilityMethodDescriptor, params: StructReader) async throws
         -> StructReader
+    func supports(interfaceID: UInt64) -> Bool
 }
 
-public struct CapabilityClient {
-    private let target: any CapabilityCallTarget
+extension CapabilityCallTarget {
+    public func supports(interfaceID: UInt64) -> Bool { true }
+}
+
+/// A lightweight request context for local dispatchers which want descriptor and
+/// cancellation state in one value.
+public struct CapabilityRequestContext {
+    public let method: CapabilityMethodDescriptor
+    public let params: StructReader
+
+    public init(method: CapabilityMethodDescriptor, params: StructReader) {
+        self.method = method
+        self.params = params
+    }
+
+    public var isCancelled: Bool { Task.isCancelled }
+    public func throwIfCancelled() throws {
+        if Task.isCancelled { throw CapabilityError.cancelled }
+    }
+}
+
+/// Owns result storage for the duration of a local call. The returned reader
+/// retains an immutable snapshot, so it remains valid after dispatch returns.
+public struct CapabilityResponseContext {
+    private let message: MessageBuilder
+    public let results: StructBuilder
+
+    public init(dataWords: Int, pointerCount: Int) throws {
+        let message = try MessageBuilder()
+        self.message = message
+        results = try message.initRootStruct(dataWords: dataWords, pointerCount: pointerCount)
+    }
+
+    public func finish() throws -> StructReader {
+        try message.asReader().rootStruct()
+    }
+}
+
+/// A local target backed by a generated or hand-written dispatch closure.
+public final class LocalCapabilityTarget: CapabilityCallTarget, @unchecked Sendable {
+    public typealias Handler = (CapabilityRequestContext) async throws -> StructReader
+
+    private let interfaceIDs: Set<UInt64>
+    private let handler: Handler
+
+    public init(interfaceIDs: Set<UInt64>, handler: @escaping Handler) {
+        self.interfaceIDs = interfaceIDs
+        self.handler = handler
+    }
+
+    public func supports(interfaceID: UInt64) -> Bool {
+        interfaceIDs.contains(interfaceID)
+    }
+
+    public func call(_ method: CapabilityMethodDescriptor, params: StructReader) async throws
+        -> StructReader
+    {
+        guard supports(interfaceID: method.interfaceID) else {
+            throw CapabilityError.unsupportedInterface(method.interfaceID)
+        }
+        if Task.isCancelled { throw CapabilityError.cancelled }
+        return try await handler(CapabilityRequestContext(method: method, params: params))
+    }
+}
+
+public struct CapabilityClient: @unchecked Sendable {
+    let target: any CapabilityCallTarget
     public let tableIndex: UInt32?
 
     public init(target: any CapabilityCallTarget) {
@@ -51,16 +153,30 @@ public struct CapabilityClient {
         self.tableIndex = tableIndex
     }
 
+    public static var null: CapabilityClient { CapabilityClient(target: NullCapabilityTarget()) }
+
+    public static func broken(_ exception: RemoteException) -> CapabilityClient {
+        CapabilityClient(target: BrokenCapabilityTarget(exception: exception))
+    }
+
+    public func cast(to interfaceID: UInt64) throws -> CapabilityClient {
+        guard target.supports(interfaceID: interfaceID) else {
+            throw CapabilityError.unsupportedInterface(interfaceID)
+        }
+        return self
+    }
+
     public func call(_ method: CapabilityMethodDescriptor, params: StructReader) async throws
         -> StructReader
     {
-        try await target.call(method, params: params)
+        if Task.isCancelled { throw CapabilityError.cancelled }
+        do {
+            return try await target.call(method, params: params)
+        } catch is CancellationError {
+            throw CapabilityError.cancelled
+        }
     }
-}
 
-public enum CapabilityError: Error, Equatable {
-    case unavailableSerializedCapability
-    case unserializableCapability
 }
 
 private final class SerializedCapabilityTarget: CapabilityCallTarget {
@@ -77,5 +193,25 @@ private final class SerializedCapabilityTarget: CapabilityCallTarget {
         _ = method
         _ = params
         throw CapabilityError.unavailableSerializedCapability
+    }
+}
+
+private final class NullCapabilityTarget: CapabilityCallTarget {
+    func supports(interfaceID: UInt64) -> Bool { false }
+    func call(_ method: CapabilityMethodDescriptor, params: StructReader) async throws
+        -> StructReader
+    {
+        throw CapabilityError.nullCapability
+    }
+}
+
+private final class BrokenCapabilityTarget: CapabilityCallTarget {
+    let exception: RemoteException
+    init(exception: RemoteException) { self.exception = exception }
+
+    func call(_ method: CapabilityMethodDescriptor, params: StructReader) async throws
+        -> StructReader
+    {
+        throw CapabilityError.broken(exception)
     }
 }

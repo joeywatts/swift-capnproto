@@ -26,6 +26,31 @@ public enum Base {
         func ping(_ params: Base.PingParams.Reader, results: Base.PingResults.Builder) async throws
     }
 
+    public static func client(_ server: any Server) -> Client {
+        Client(
+            CapabilityClient(
+                target: LocalCapabilityTarget(interfaceIDs: Set([16445351315435886556])) {
+                    context in
+                    try await dispatch(server, context: context)
+                }))
+    }
+
+    public static func dispatch(_ server: any Server, context: CapabilityRequestContext)
+        async throws -> StructReader
+    {
+        switch (context.method.interfaceID, context.method.methodID) {
+        case (schemaID, 0):
+            try context.throwIfCancelled()
+            let response = try CapabilityResponseContext(dataWords: 0, pointerCount: 1)
+            let result = Base.PingResults.Builder(response.results)
+            try await server.ping(Base.PingParams.Reader(context.params), results: result)
+            return try response.finish()
+        default:
+            throw CapabilityError.unknownMethod(
+                interfaceID: context.method.interfaceID, methodID: context.method.methodID)
+        }
+    }
+
     public enum Methods {
         public static let ping = CapabilityMethodDescriptor(
             interfaceID: 16445351315435886556, methodID: 0, name: "ping",
@@ -133,12 +158,46 @@ public enum Child {
         public func streamIt(_ params: Child.StreamItParams.Reader) async throws {
             _ = try await raw.call(Methods.streamIt, params: params.raw)
         }
+        public var asBase: Base.Client { Base.Client(raw) }
     }
 
     public protocol Server: Base.Server {
         func call(_ params: Child.CallParams.Reader, results: Child.CallResults.Builder)
             async throws
         func streamIt(_ params: Child.StreamItParams.Reader) async throws
+    }
+
+    public static func client(_ server: any Server) -> Client {
+        Client(
+            CapabilityClient(
+                target: LocalCapabilityTarget(
+                    interfaceIDs: Set([16383580762931240131, 16445351315435886556])
+                ) { context in
+                    try await dispatch(server, context: context)
+                }))
+    }
+
+    public static func dispatch(_ server: any Server, context: CapabilityRequestContext)
+        async throws -> StructReader
+    {
+        switch (context.method.interfaceID, context.method.methodID) {
+        case (schemaID, 0):
+            try context.throwIfCancelled()
+            let response = try CapabilityResponseContext(dataWords: 0, pointerCount: 1)
+            let result = Child.CallResults.Builder(response.results)
+            try await server.call(Child.CallParams.Reader(context.params), results: result)
+            return try response.finish()
+        case (schemaID, 1):
+            try context.throwIfCancelled()
+            let response = try CapabilityResponseContext(dataWords: 0, pointerCount: 0)
+            try await server.streamIt(Child.StreamItParams.Reader(context.params))
+            return try response.finish()
+        case (Base.schemaID, _):
+            return try await Base.dispatch(server, context: context)
+        default:
+            throw CapabilityError.unknownMethod(
+                interfaceID: context.method.interfaceID, methodID: context.method.methodID)
+        }
     }
 
     public enum Methods {
