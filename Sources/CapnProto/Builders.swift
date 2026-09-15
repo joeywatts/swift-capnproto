@@ -78,6 +78,15 @@ extension MessageBuilder {
             elementSize: elementSize, count: count)
     }
 
+    public func initRootStructList(count: Int, dataWords: Int, pointerCount: Int) throws
+        -> StructListBuilder
+    {
+        try arena.setWord(0, segment: 0, index: 0)
+        return try StructListBuilder.initialize(
+            arena: arena, pointerSegment: 0, pointerIndex: 0, count: count,
+            dataWords: dataWords, pointerCount: pointerCount)
+    }
+
     public func initRootData(count: Int) throws -> DataBuilder {
         DataBuilder(list: try initRootList(elementSize: .byte, count: count))
     }
@@ -164,6 +173,41 @@ public struct StructBuilder {
         try arena.setWord(0, segment: segment, index: try pointerIndex(index))
     }
 
+    public func clearData(inByteRange range: Range<Int>) throws {
+        guard range.lowerBound >= 0, range.upperBound <= dataWordCount * 8 else {
+            throw CapnProtoError.indexOutOfBounds(
+                index: range.upperBound, count: dataWordCount * 8)
+        }
+        try arena.withBytes(segment: segment) { bytes in
+            let start = dataStart * 8 + range.lowerBound
+            bytes.replaceSubrange(
+                start..<(dataStart * 8 + range.upperBound),
+                with: repeatElement(0, count: range.count))
+        }
+    }
+
+    /// Clears the storage occupied by a group. Pointer indices need not be
+    /// contiguous, which supports interleaved group layouts.
+    public func clearGroup(dataByteRanges: [Range<Int>], pointerIndices: [Int]) throws {
+        for range in dataByteRanges { try clearData(inByteRange: range) }
+        for index in pointerIndices { try clearPointer(at: index) }
+    }
+
+    public func setDiscriminant(atByte offset: Int, to value: UInt16) throws {
+        try setInteger(atByte: offset, to: value)
+    }
+
+    /// Selects a union member after zeroing storage owned by the previous member.
+    /// Any UInt16 value is accepted so unknown discriminants can be preserved.
+    public func selectUnion(
+        discriminant value: UInt16, atByte offset: Int,
+        clearingData dataByteRanges: [Range<Int>] = [],
+        clearingPointers pointerIndices: [Int] = []
+    ) throws {
+        try clearGroup(dataByteRanges: dataByteRanges, pointerIndices: pointerIndices)
+        try setDiscriminant(atByte: offset, to: value)
+    }
+
     public func initStructField(at index: Int, dataWords: Int, pointerCount: Int) throws
         -> StructBuilder
     {
@@ -187,6 +231,16 @@ public struct StructBuilder {
         return try ListBuilder.initialize(
             arena: arena, pointerSegment: segment, pointerIndex: pointer,
             elementSize: elementSize, count: count)
+    }
+
+    public func initStructListField(
+        at index: Int, count: Int, dataWords: Int, pointerCount: Int
+    ) throws -> StructListBuilder {
+        let pointer = try pointerIndex(index)
+        try arena.setWord(0, segment: segment, index: pointer)
+        return try StructListBuilder.initialize(
+            arena: arena, pointerSegment: segment, pointerIndex: pointer, count: count,
+            dataWords: dataWords, pointerCount: pointerCount)
     }
 
     public func initDataField(at index: Int, count: Int) throws -> DataBuilder {
@@ -221,6 +275,8 @@ public struct ListBuilder {
     let startWord: Int
     public let elementSize: ListElementSize
     public let count: Int
+    let pointerSegment: Int
+    let pointerIndex: Int
 
     static func initialize(
         arena: BuilderArena, pointerSegment: Int, pointerIndex: Int,
@@ -238,7 +294,8 @@ public struct ListBuilder {
             pointerValue: .list(size: elementSize, countOrWords: count))
         return ListBuilder(
             arena: arena, segment: object.allocation.segmentID, startWord: object.objectStart,
-            elementSize: elementSize, count: count)
+            elementSize: elementSize, count: count, pointerSegment: pointerSegment,
+            pointerIndex: pointerIndex)
     }
 
     public func setBool(at index: Int, to value: Bool) throws {
@@ -281,9 +338,119 @@ public struct ListBuilder {
         try setInteger(at: index, to: value.bitPattern)
     }
 
+    public func initList(
+        at index: Int, elementSize childElementSize: ListElementSize, count childCount: Int
+    ) throws -> ListBuilder {
+        let pointer = try elementPointerIndex(index)
+        try arena.setWord(0, segment: segment, index: pointer)
+        return try ListBuilder.initialize(
+            arena: arena, pointerSegment: segment, pointerIndex: pointer,
+            elementSize: childElementSize, count: childCount)
+    }
+
+    public func initStruct(at index: Int, dataWords: Int, pointerCount: Int) throws
+        -> StructBuilder
+    {
+        try validateStructSize(dataWords: dataWords, pointerCount: pointerCount)
+        let pointer = try elementPointerIndex(index)
+        try arena.setWord(0, segment: segment, index: pointer)
+        let object = try arena.allocateObject(
+            words: try checkedAdd(dataWords, pointerCount), fromPointerIn: segment, at: pointer,
+            pointerValue: .struct(dataWords: dataWords, pointerWords: pointerCount))
+        return StructBuilder(
+            arena: arena, segment: object.allocation.segmentID, dataStart: object.objectStart,
+            dataWords: dataWords, pointerStart: object.objectStart + dataWords,
+            pointerCount: pointerCount)
+    }
+
+    /// Applies the wire-format primitive-list to struct-list upgrade rule while
+    /// preserving each primitive as field zero of the corresponding struct.
+    public func upgradeToStructList(dataWords: Int, pointerCount: Int) throws -> StructListBuilder {
+        guard elementSize != .pointer, elementSize != .inlineComposite else {
+            throw CapnProtoError.typeMismatch(expected: "primitive list", actual: "\(elementSize)")
+        }
+        guard dataWords > 0 || elementSize == .void else {
+            throw CapnProtoError.typeMismatch(
+                expected: "data-bearing struct", actual: "empty struct")
+        }
+        let oldBytes = arena.segments[segment].bytes
+        let upgraded = try StructListBuilder.initialize(
+            arena: arena, pointerSegment: pointerSegment, pointerIndex: pointerIndex, count: count,
+            dataWords: dataWords, pointerCount: pointerCount)
+        if elementSize == .void { return upgraded }
+        if elementSize == .bit {
+            for index in 0..<count {
+                let byte = oldBytes[startWord * 8 + index / 8]
+                try upgraded[index].setBool(atBit: 0, to: byte & (1 << UInt8(index % 8)) != 0)
+            }
+            return upgraded
+        }
+        let width = elementSize.bitWidth! / 8
+        for index in 0..<count {
+            let source = startWord * 8 + index * width
+            try arena.withBytes(segment: upgraded.segment) { destination in
+                let target = (upgraded.elementsStart + index * upgraded.wordsPerElement) * 8
+                destination.replaceSubrange(
+                    target..<(target + width), with: oldBytes[source..<(source + width)])
+            }
+        }
+        return upgraded
+    }
+
+    private func elementPointerIndex(_ index: Int) throws -> Int {
+        try check(index)
+        guard elementSize == .pointer else {
+            throw CapnProtoError.typeMismatch(expected: "pointer list", actual: "\(elementSize)")
+        }
+        return startWord + index
+    }
+
     func check(_ index: Int) throws {
         guard index >= 0, index < count else {
             throw CapnProtoError.indexOutOfBounds(index: index, count: count)
+        }
+    }
+}
+
+public struct StructListBuilder {
+    let arena: BuilderArena
+    let segment: Int
+    let elementsStart: Int
+    public let count: Int
+    public let dataWordCount: Int
+    public let pointerCount: Int
+
+    var wordsPerElement: Int { dataWordCount + pointerCount }
+
+    static func initialize(
+        arena: BuilderArena, pointerSegment: Int, pointerIndex: Int, count: Int,
+        dataWords: Int, pointerCount: Int
+    ) throws -> StructListBuilder {
+        guard count >= 0 else { throw CapnProtoError.arithmeticOverflow }
+        try validateStructSize(dataWords: dataWords, pointerCount: pointerCount)
+        let stride = try checkedAdd(dataWords, pointerCount)
+        let contentWords = try checkedMultiply(count, stride)
+        let object = try arena.allocateObject(
+            words: try checkedAdd(contentWords, 1), fromPointerIn: pointerSegment, at: pointerIndex,
+            pointerValue: .list(size: .inlineComposite, countOrWords: contentWords))
+        let tag = try PointerValue.struct(dataWords: dataWords, pointerWords: pointerCount)
+            .word(offset: count)
+        try arena.setWord(tag, segment: object.allocation.segmentID, index: object.objectStart)
+        return StructListBuilder(
+            arena: arena, segment: object.allocation.segmentID,
+            elementsStart: object.objectStart + 1, count: count,
+            dataWordCount: dataWords, pointerCount: pointerCount)
+    }
+
+    public subscript(index: Int) -> StructBuilder {
+        get throws {
+            guard index >= 0, index < count else {
+                throw CapnProtoError.indexOutOfBounds(index: index, count: count)
+            }
+            let start = try checkedAdd(elementsStart, try checkedMultiply(index, wordsPerElement))
+            return StructBuilder(
+                arena: arena, segment: segment, dataStart: start, dataWords: dataWordCount,
+                pointerStart: start + dataWordCount, pointerCount: pointerCount)
         }
     }
 }
