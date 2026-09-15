@@ -101,6 +101,16 @@ final class BuilderArena {
         return try body(&segments[segment].bytes)
     }
 
+    func clearWords(segment: Int, start: Int, count: Int) throws {
+        guard segments.indices.contains(segment), start >= 0, count >= 0,
+            start <= segments[segment].usedWords - count
+        else {
+            throw CapnProtoError.objectOutOfBounds(segment: segment, start: start, words: count)
+        }
+        let range = (start * 8)..<((start + count) * 8)
+        segments[segment].bytes.replaceSubrange(range, with: repeatElement(0, count: range.count))
+    }
+
     var outputSegments: [[UInt8]] {
         segments.map { Array($0.bytes.prefix($0.usedWords * 8)) }
     }
