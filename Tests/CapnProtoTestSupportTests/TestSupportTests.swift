@@ -46,6 +46,7 @@ import Testing
         let bytes = (0..<size).map { _ in UInt8(truncatingIfNeeded: generator.next()) }
         _ = MessageFuzzTarget.consume(bytes)
         _ = PackedFuzzTarget.consume(bytes)
+        _ = SchemaRequestFuzzTarget.consume(bytes)
     }
 }
 
@@ -61,5 +62,6 @@ import Testing
         let bytes = [UInt8](try Data(contentsOf: file))
         _ = MessageFuzzTarget.consume(bytes)
         _ = PackedFuzzTarget.consume(bytes)
+        _ = SchemaRequestFuzzTarget.consume(bytes)
     }
 }

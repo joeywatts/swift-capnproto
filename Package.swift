@@ -36,7 +36,7 @@ let package = Package(
         ),
         .target(
             name: "CapnProtoTestSupport",
-            dependencies: ["CapnProto"],
+            dependencies: ["CapnProto", "CapnProtoSchema"],
             path: "Tests/Support"
         ),
         .executableTarget(name: "capnpc-swift", dependencies: ["CapnProtoCompiler"]),
@@ -52,6 +52,11 @@ let package = Package(
             name: "capnp-fuzz-packed",
             dependencies: ["CapnProtoTestSupport"],
             path: "Fuzz/Packed"
+        ),
+        .executableTarget(
+            name: "capnp-fuzz-schema",
+            dependencies: ["CapnProtoTestSupport"],
+            path: "Fuzz/Schema"
         ),
         .executableTarget(
             name: "capnp-benchmark",

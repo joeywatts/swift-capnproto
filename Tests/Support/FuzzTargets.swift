@@ -1,4 +1,5 @@
 import CapnProto
+import CapnProtoSchema
 
 public enum FuzzResult: Equatable, Sendable {
     case accepted
@@ -61,5 +62,21 @@ public enum PackedFuzzTarget {
     public static func consume(_ bytes: [UInt8]) -> FuzzResult {
         (try? PackedEncoding.unpack(bytes, maximumOutputBytes: 64 * 1_024 * 1_024)) == nil
             ? .rejected : .accepted
+    }
+}
+
+public enum SchemaRequestFuzzTarget {
+    public static func consume(_ bytes: [UInt8]) -> FuzzResult {
+        do {
+            let request = try Schema.CodeGeneratorRequest(
+                framedBytes: bytes,
+                options: ReaderOptions(traversalLimitInWords: 1_048_576, nestingLimit: 64))
+            var loader = SchemaLoader()
+            try loader.load(request: request)
+            try loader.finish()
+            return .accepted
+        } catch {
+            return .rejected
+        }
     }
 }
