@@ -36,5 +36,13 @@ concatenated and partial reads, and asynchronous byte chunks. Packed encoding is
 incremental and expansion-bounded. Canonicalization emits one dense segment in
 pointer preorder, truncates zero-valued struct sections, normalizes list padding,
 and validates canonical form by exact bytes. These paths are cross-checked with
-the pinned C++ oracle. Typed schemas and capability interface shapes are
-generated; reflection and RPC execution remain scheduled for later milestones.
+the pinned C++ oracle.
+
+Schema loading, typed/dynamic reflection, and deterministic value diagnostics are
+implemented. Generated capability clients execute against local generated server
+dispatchers, including inherited and streaming methods. Promise capabilities,
+ordered local pipelining, cancellation, and exact-once capability-table lifetime
+accounting are implemented. A bounded in-memory duplex byte transport provides
+deterministic fragmentation, coalescing, tracing, backpressure, EOF, and injected
+faults for RPC state-machine tests. RPC wire messages and production networking
+remain scheduled for Milestone 6.
