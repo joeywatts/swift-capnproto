@@ -1,0 +1,4 @@
+{
+  "moduleName": "PluginExample",
+  "importPaths": ["Schemas"]
+}

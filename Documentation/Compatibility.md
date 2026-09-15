@@ -36,5 +36,5 @@ concatenated and partial reads, and asynchronous byte chunks. Packed encoding is
 incremental and expansion-bounded. Canonicalization emits one dense segment in
 pointer preorder, truncates zero-valued struct sections, normalizes list padding,
 and validates canonical form by exact bytes. These paths are cross-checked with
-the pinned C++ oracle. Generated types, schemas, and RPC remain scheduled for
-later milestones.
+the pinned C++ oracle. Typed schemas and capability interface shapes are
+generated; reflection and RPC execution remain scheduled for later milestones.

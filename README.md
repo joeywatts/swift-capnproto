@@ -4,13 +4,14 @@
 [Cap'n Proto](https://capnproto.org/), including serialization, schema-driven
 code generation, reflection, and capability-based RPC.
 
-The project has completed the checked wire-format reader and serialization
-milestones. It can read, build, mutate, deep-copy, frame, pack, and canonicalize
-single- and multi-segment messages using untyped struct, list, text, and data
-views. Readers enforce nesting and traversal limits, while framing and packed
-decoders bound attacker-controlled expansion. Strongly typed generated APIs are
-the next milestone. The implementation sequence, commit boundaries, and
-upstream-informed verification criteria are described in [ROADMAP.md](ROADMAP.md).
+The project has completed the checked wire-format, serialization, and typed
+code-generation milestones. It generates Swift readers, builders, enums,
+defaults, unions, groups, generic pointer adapters, and capability interfaces;
+the opt-in SwiftPM plugin integrates `.capnp` files into consumer targets.
+Readers enforce nesting and traversal limits, while framing and packed decoders
+bound attacker-controlled expansion. The implementation sequence, commit
+boundaries, and upstream-informed verification criteria are described in
+[ROADMAP.md](ROADMAP.md).
 
 ## Intended products
 
@@ -51,6 +52,8 @@ The normal validation entry points are:
 ```sh
 swift test
 Scripts/check-package-boundaries.sh
+Scripts/verify-swift-codegen.sh
+Scripts/verify-swiftpm-plugin.sh
 Scripts/verify-fuzz-targets.sh
 Scripts/run-benchmarks.sh
 ```
