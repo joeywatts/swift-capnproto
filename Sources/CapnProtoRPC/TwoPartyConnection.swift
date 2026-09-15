@@ -11,6 +11,13 @@ public struct TwoPartyConnectionSnapshot: Equatable, Sendable {
     public let terminalError: String?
 }
 
+/// A server may throw this directive to forward its answer to another question
+/// using the protocol's `takeFromOtherQuestion` return variant.
+public struct RPCTailCall: Error, Equatable, Sendable {
+    public let questionID: UInt32
+    public init(questionID: UInt32) { self.questionID = questionID }
+}
+
 private final class PendingWireQuestion: @unchecked Sendable {
     private let lock = NSLock()
     private var continuation: CheckedContinuation<[UInt8], any Error>?
@@ -134,6 +141,8 @@ public actor TwoPartyRPCConnection {
     private var nextExportID: UInt32 = 0
     private var nextEmbargoID: UInt32 = 0
     private var pending: [UInt32: PendingWireQuestion] = [:]
+    private var returnedMessages: [UInt32: [UInt8]] = [:]
+    private var cancelledQuestionIDs: Set<UInt32> = []
     private var embargoWaiters: [UInt32: PendingWireQuestion] = [:]
     private var answers: [UInt32: Task<Void, Never>] = [:]
     private var exports: [UInt32: CapabilityClient] = [:]
@@ -305,10 +314,14 @@ public actor TwoPartyRPCConnection {
                 throw CapabilityError.broken(try remoteException(exception))
             case .canceled: throw CapabilityError.cancelled
             case .takeFromOtherQuestion(let other):
-                guard let otherWaiter = pending[other] else {
+                let otherBytes: [UInt8]
+                if let completed = returnedMessages[other] {
+                    otherBytes = completed
+                } else if let otherWaiter = pending[other] {
+                    otherBytes = try await otherWaiter.wait()
+                } else {
                     throw RPCProtocolError.unknownQuestion(other)
                 }
-                let otherBytes = try await otherWaiter.wait()
                 let otherMessage = try RPCWireValidator.decode(
                     otherBytes, maximumWords: maximumMessageWords)
                 guard case .return(let otherReturn) = try otherMessage.which,
@@ -335,6 +348,8 @@ public actor TwoPartyRPCConnection {
         receiveTask = nil
         let waiters = Array(pending.values)
         pending.removeAll()
+        returnedMessages.removeAll()
+        cancelledQuestionIDs.removeAll()
         let barriers = Array(embargoWaiters.values)
         embargoWaiters.removeAll()
         let work = Array(answers.values)
@@ -416,6 +431,8 @@ public actor TwoPartyRPCConnection {
                 do {
                     let value = try await target.call(method, params: params)
                     try await self?.sendResults(answerID: id, value: value)
+                } catch let tail as RPCTailCall {
+                    try? await self?.sendTailReturn(answerID: id, from: tail.questionID)
                 } catch {
                     try? await self?.sendException(answerID: id, error: error)
                 }
@@ -426,8 +443,10 @@ public actor TwoPartyRPCConnection {
         case .return(let result):
             let id = try result.answerId
             guard let waiter = pending.removeValue(forKey: id) else {
+                if cancelledQuestionIDs.remove(id) != nil { return }
                 throw RPCProtocolError.unknownQuestion(id)
             }
+            returnedMessages[id] = bytes
             waiter.resume(returning: bytes)
         case .finish(let finish):
             let id = try finish.questionId
@@ -580,9 +599,18 @@ public actor TwoPartyRPCConnection {
         }
     }
 
+    private func sendTailReturn(answerID: UInt32, from otherQuestionID: UInt32) async throws {
+        try await sendMessage { root in
+            let result = try root.initReturn()
+            try result.setAnswerId(answerID)
+            try result.setTakeFromOtherQuestion(otherQuestionID)
+        }
+    }
+
     private func finishQuestion(_ id: UInt32, releaseCaps: Bool) async {
         validation.outboundQuestions.remove(id)
         validation.returnedQuestions.remove(id)
+        returnedMessages.removeValue(forKey: id)
         guard !closed else { return }
         try? await sendMessage { root in
             let finish = try root.initFinish()
@@ -593,6 +621,8 @@ public actor TwoPartyRPCConnection {
 
     private func cancelQuestion(_ id: UInt32) async {
         pending.removeValue(forKey: id)?.resume(throwing: CapabilityError.cancelled)
+        cancelledQuestionIDs.insert(id)
+        validation.cancelledOutboundQuestions.insert(id)
         await finishQuestion(id, releaseCaps: true)
     }
 

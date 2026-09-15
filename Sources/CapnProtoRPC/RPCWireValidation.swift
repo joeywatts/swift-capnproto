@@ -24,6 +24,7 @@ public struct RPCWireValidationState: Equatable, Sendable {
     public var inboundQuestions: Set<UInt32> = []
     public var outboundQuestions: Set<UInt32> = []
     public var returnedQuestions: Set<UInt32> = []
+    public var cancelledOutboundQuestions: Set<UInt32> = []
     public var exports: Set<UInt32> = []
     public var imports: Set<UInt32> = []
     public var senderLoopbackEmbargoes: Set<UInt32> = []
@@ -78,10 +79,11 @@ public enum RPCWireValidator {
             try beginInboundQuestion(try call.questionId, state: &next)
         case .return(let result):
             let id = try result.answerId
-            guard next.outboundQuestions.contains(id) else {
+            let wasCancelled = next.cancelledOutboundQuestions.remove(id) != nil
+            guard next.outboundQuestions.contains(id) || wasCancelled else {
                 throw RPCProtocolError.unknownQuestion(id)
             }
-            guard next.returnedQuestions.insert(id).inserted else {
+            guard wasCancelled || next.returnedQuestions.insert(id).inserted else {
                 throw RPCProtocolError.duplicateReturn(id)
             }
             switch try result.which {

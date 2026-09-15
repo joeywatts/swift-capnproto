@@ -127,6 +127,45 @@ private actor NeverReturnWireService: CapabilityCallTarget {
     await #expect(throws: CapabilityError.cancelled) { _ = try await call.value }
     while !(await service.cancelled) { await Task.yield() }
     #expect((await server.snapshot).answers == 0)
+    for _ in 0..<10 { await Task.yield() }
+    #expect(!(await client.snapshot).isClosed)
+    await client.close()
+    await server.close()
+}
+
+private actor StreamingProbe: CapabilityCallTarget {
+    private var active = 0
+    private(set) var maximumActive = 0
+
+    func call(_ method: CapabilityMethodDescriptor, params: StructReader) async throws
+        -> StructReader
+    {
+        active += 1
+        maximumActive = max(maximumActive, active)
+        await Task.yield()
+        active -= 1
+        return params
+    }
+}
+
+// Adapts Rpc.Streaming and its flow-control ordering cases from rpc-test.c++ at
+// pinned commit 3a82de9b39736a2625f03c93b2b7c50642dd5b25.
+@Test func streamingCallsApplyOneAtATimeFlowControl() async throws {
+    let service = StreamingProbe()
+    let (a, b) = InMemoryRPCTransport.makePair()
+    let client = TwoPartyRPCConnection(side: .client, transport: a)
+    let server = TwoPartyRPCConnection(
+        side: .server, transport: b, bootstrap: CapabilityClient(target: service))
+    await client.start()
+    await server.start()
+    let remote = try await client.bootstrap()
+    try await withThrowingTaskGroup(of: Void.self) { group in
+        for value in UInt32(0)..<8 {
+            group.addTask { _ = try await remote.call(wireMethod, params: wireValue(value)) }
+        }
+        try await group.waitForAll()
+    }
+    #expect(await service.maximumActive == 1)
     await client.close()
     await server.close()
 }

@@ -82,3 +82,25 @@ private func rpcBytes(_ configure: (Message.Builder) throws -> Void) throws -> [
     }
     #expect(state == before)
 }
+
+@Test func validatorAcceptsTailCallsAndLateCancellationReturns() throws {
+    var state = RPCWireValidationState()
+    state.outboundQuestions = [1, 2]
+    let tail = try rpcBytes { root in
+        let value = try root.initReturn()
+        try value.setAnswerId(2)
+        try value.setTakeFromOtherQuestion(1)
+    }
+    try RPCWireValidator.validate(try RPCWireValidator.decode(tail), state: &state)
+    #expect(state.returnedQuestions == [2])
+
+    state.outboundQuestions.remove(1)
+    state.cancelledOutboundQuestions.insert(1)
+    let late = try rpcBytes { root in
+        let value = try root.initReturn()
+        try value.setAnswerId(1)
+        try value.setCanceled()
+    }
+    try RPCWireValidator.validate(try RPCWireValidator.decode(late), state: &state)
+    #expect(state.cancelledOutboundQuestions.isEmpty)
+}
