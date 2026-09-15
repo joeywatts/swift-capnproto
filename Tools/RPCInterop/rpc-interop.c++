@@ -19,12 +19,23 @@ private:
   kj::Own<kj::PromiseFulfiller<void>> done;
 };
 
+class BootstrapImpl final: public Bootstrap::Server {
+public:
+  explicit BootstrapImpl(kj::Own<kj::PromiseFulfiller<void>> done): done(kj::mv(done)) {}
+  kj::Promise<void> getEcho(GetEchoContext context) override {
+    context.getResults().setEcho(kj::heap<EchoImpl>(kj::mv(done)));
+    return kj::READY_NOW;
+  }
+private:
+  kj::Own<kj::PromiseFulfiller<void>> done;
+};
+
 int main(int argc, char** argv) {
   KJ_REQUIRE(argc >= 2, "usage: rpc-interop server|client [port]");
   std::string mode = argv[1];
   if (mode == "server") {
     auto paf = kj::newPromiseAndFulfiller<void>();
-    capnp::EzRpcServer server(kj::heap<EchoImpl>(kj::mv(paf.fulfiller)), "127.0.0.1", 0);
+    capnp::EzRpcServer server(kj::heap<BootstrapImpl>(kj::mv(paf.fulfiller)), "127.0.0.1", 0);
     std::cout << server.getPort().wait(server.getWaitScope()) << std::endl;
     paf.promise.wait(server.getWaitScope());
     server.getIoProvider().getTimer().afterDelay(10 * kj::MILLISECONDS).wait(server.getWaitScope());
@@ -32,7 +43,9 @@ int main(int argc, char** argv) {
   }
   KJ_REQUIRE(mode == "client" && argc == 3, "client requires port");
   capnp::EzRpcClient client("127.0.0.1", static_cast<uint>(std::strtoul(argv[2], nullptr, 10)));
-  auto echo = client.getMain<Echo>();
+  auto bootstrap = client.getMain<Bootstrap>();
+  auto pipeline = bootstrap.getEchoRequest().send();
+  auto echo = pipeline.getEcho();
   auto request = echo.incrementRequest();
   request.setValue(41);
   std::cout << request.send().wait(client.getWaitScope()).getValue() << std::endl;

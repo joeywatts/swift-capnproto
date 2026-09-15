@@ -6,6 +6,9 @@ import Foundation
 private let method = CapabilityMethodDescriptor(
     interfaceID: 0xeeee_eeee_eeee_eeee, methodID: 0, name: "increment",
     paramStructID: 0, resultStructID: 0, isStreaming: false)
+private let getEcho = CapabilityMethodDescriptor(
+    interfaceID: 0xbbbb_bbbb_bbbb_bbbb, methodID: 0, name: "getEcho",
+    paramStructID: 0, resultStructID: 0, isStreaming: false)
 
 private func value(_ number: UInt32) throws -> StructReader {
     let message = try MessageBuilder()
@@ -44,6 +47,28 @@ private final class Echo: CapabilityCallTarget, @unchecked Sendable {
     }
 }
 
+private final class BootstrapService: CapabilityCallTargetWithCaps, @unchecked Sendable {
+    let echo: CapabilityClient
+    init(completion: Completion) { echo = CapabilityClient(target: Echo(completion: completion)) }
+    func call(_ descriptor: CapabilityMethodDescriptor, params: StructReader) async throws
+        -> StructReader
+    { throw CapabilityError.unserializableCapability }
+    func call(
+        _ descriptor: CapabilityMethodDescriptor, params: StructReader,
+        capabilities: [CapabilityClient]
+    ) async throws -> CapabilityCallResult {
+        guard descriptor.interfaceID == getEcho.interfaceID, descriptor.methodID == 0 else {
+            throw CapabilityError.unknownMethod(
+                interfaceID: descriptor.interfaceID, methodID: descriptor.methodID)
+        }
+        let message = try MessageBuilder()
+        let root = try message.initRootStruct(dataWords: 0, pointerCount: 1)
+        try root.setCapabilityField(at: 0, tableIndex: 0)
+        return CapabilityCallResult(
+            results: try message.asReader().rootStruct(), capabilities: [echo])
+    }
+}
+
 @main enum RPCInteropMain {
     static func main() async throws {
         let arguments = CommandLine.arguments
@@ -53,7 +78,7 @@ private final class Echo: CapabilityCallTarget, @unchecked Sendable {
             let listener = try await NIORPCListener.bind(host: "127.0.0.1", port: 0) { transport in
                 let connection = TwoPartyRPCConnection(
                     side: .server, transport: transport,
-                    bootstrap: CapabilityClient(target: Echo(completion: completion)))
+                    bootstrap: CapabilityClient(target: BootstrapService(completion: completion)))
                 await completion.attach(connection)
                 await connection.start()
             }
@@ -70,7 +95,11 @@ private final class Echo: CapabilityCallTarget, @unchecked Sendable {
             await connection.start()
             do {
                 let remote = try await connection.bootstrap()
-                let result = try await remote.call(method, params: value(41))
+                let parent = Task { try await remote.call(getEcho, params: value(0)) }
+                while (await connection.snapshot).questions < 1 { await Task.yield() }
+                let pipelined = await connection.pipeline(questionID: 1, pointerFields: [0])
+                let result = try await pipelined.call(method, params: value(41))
+                _ = try await parent.value
                 print(try result.integer(atByte: 0, as: UInt32.self))
                 await connection.close()
             } catch {

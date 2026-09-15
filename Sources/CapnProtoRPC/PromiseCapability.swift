@@ -91,13 +91,42 @@ private enum PromiseState {
     case rejected(RemoteException)
 }
 
+enum PromiseResolution: @unchecked Sendable {
+    case capability(CapabilityClient)
+    case exception(RemoteException)
+}
+
 final class PromiseCapabilityTarget: CapabilityCallTarget, @unchecked Sendable {
     private let lock = NSLock()
     private var state: PromiseState = .unresolved
     private var calls: [PendingCapabilityCall] = []
     private var nextSequence: UInt64 = 0
+    private var resolutionObservers: [@Sendable (PromiseResolution) -> Void] = []
 
     var pendingCallCount: Int { lock.withLock { calls.count } }
+
+    var currentResolution: PromiseResolution? {
+        lock.withLock {
+            switch state {
+            case .unresolved: nil
+            case .resolved(let client): .capability(client)
+            case .rejected(let exception): .exception(exception)
+            }
+        }
+    }
+
+    func observeResolution(_ observer: @escaping @Sendable (PromiseResolution) -> Void) {
+        let resolution: PromiseResolution? = lock.withLock {
+            switch state {
+            case .unresolved:
+                resolutionObservers.append(observer)
+                return nil
+            case .resolved(let client): return .capability(client)
+            case .rejected(let exception): return .exception(exception)
+            }
+        }
+        if let resolution { observer(resolution) }
+    }
 
     func supports(interfaceID: UInt64) -> Bool {
         lock.withLock {
@@ -173,13 +202,20 @@ final class PromiseCapabilityTarget: CapabilityCallTarget, @unchecked Sendable {
                 throw CapabilityError.promiseResolutionLoop
             }
         }
-        let pending: [PendingCapabilityCall] = try lock.withLock {
-            guard case .unresolved = state else { throw CapabilityError.promiseAlreadyResolved }
-            state = .resolved(client)
-            let result = calls.sorted { $0.sequence < $1.sequence }
-            calls.removeAll(keepingCapacity: false)
-            return result
-        }
+        let (pending, observers):
+            ([PendingCapabilityCall], [@Sendable (PromiseResolution) -> Void]) =
+                try lock.withLock {
+                    guard case .unresolved = state else {
+                        throw CapabilityError.promiseAlreadyResolved
+                    }
+                    state = .resolved(client)
+                    let result = calls.sorted { $0.sequence < $1.sequence }
+                    calls.removeAll(keepingCapacity: false)
+                    let observers = resolutionObservers
+                    resolutionObservers.removeAll(keepingCapacity: false)
+                    return (result, observers)
+                }
+        for observer in observers { observer(.capability(client)) }
         guard !pending.isEmpty else { return }
         Task {
             for call in pending {
@@ -194,13 +230,20 @@ final class PromiseCapabilityTarget: CapabilityCallTarget, @unchecked Sendable {
     }
 
     fileprivate func reject(_ exception: RemoteException) throws {
-        let pending: [PendingCapabilityCall] = try lock.withLock {
-            guard case .unresolved = state else { throw CapabilityError.promiseAlreadyResolved }
-            state = .rejected(exception)
-            let result = calls
-            calls.removeAll(keepingCapacity: false)
-            return result
-        }
+        let (pending, observers):
+            ([PendingCapabilityCall], [@Sendable (PromiseResolution) -> Void]) =
+                try lock.withLock {
+                    guard case .unresolved = state else {
+                        throw CapabilityError.promiseAlreadyResolved
+                    }
+                    state = .rejected(exception)
+                    let result = calls
+                    calls.removeAll(keepingCapacity: false)
+                    let observers = resolutionObservers
+                    resolutionObservers.removeAll(keepingCapacity: false)
+                    return (result, observers)
+                }
+        for observer in observers { observer(.exception(exception)) }
         for call in pending {
             call.continuation.resume(throwing: CapabilityError.broken(exception))
         }

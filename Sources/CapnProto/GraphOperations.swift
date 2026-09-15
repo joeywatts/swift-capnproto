@@ -175,6 +175,12 @@ func copyPointerGraph(
                         destinationOffset: destination.startWord * 8)
                 }
             }
+        case 3:
+            // Capability pointers are table indices rather than graph objects.
+            // Preserve the index while the RPC layer copies the parallel cap table.
+            try arena.setWord(
+                task.source.raw, segment: task.destinationSegment,
+                index: task.destinationIndex)
         default:
             throw CapnProtoError.invalidPointerKind(task.source.kind)
         }
