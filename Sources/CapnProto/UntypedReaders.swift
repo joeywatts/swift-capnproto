@@ -98,6 +98,10 @@ public struct StructReader {
         return TextReader(data: data)
     }
 
+    public func hasPointer(at index: Int) throws -> Bool {
+        try !pointer(at: index).isNull
+    }
+
     func pointer(at index: Int) throws -> ResolvedPointer {
         guard index >= 0 else {
             throw CapnProtoError.indexOutOfBounds(index: index, count: pointerCount)
@@ -182,6 +186,24 @@ public struct ListReader {
 
     public func pointerElement(at index: Int) throws -> ListReader {
         try pointer(at: index).asList(depth: depth + 1)
+    }
+
+    public func dataPointerElement(at index: Int) throws -> DataReader {
+        let value = try pointerElement(at: index)
+        guard value.elementSize == .byte || value.isNull else {
+            throw CapnProtoError.typeMismatch(
+                expected: "byte list", actual: "\(value.elementSize)")
+        }
+        return DataReader(list: value)
+    }
+
+    public func textPointerElement(at index: Int) throws -> TextReader {
+        let data = try dataPointerElement(at: index)
+        if data.isNull { return TextReader(data: data) }
+        guard data.count > 0, try data.byte(at: data.count - 1) == 0 else {
+            throw CapnProtoError.invalidText
+        }
+        return TextReader(data: data)
     }
 
     public func structPointerElement(at index: Int) throws -> StructReader {

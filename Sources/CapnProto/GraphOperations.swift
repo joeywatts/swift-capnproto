@@ -23,6 +23,12 @@ private struct CopyTask {
     let destinationIndex: Int
 }
 
+private struct CopiedObject {
+    let segment: Int
+    let targetStart: Int
+    let pointerValue: PointerValue
+}
+
 func copyPointerGraph(
     source: CopySource, to arena: BuilderArena, pointerSegment: Int, pointerIndex: Int
 ) throws {
@@ -60,6 +66,7 @@ func copyPointerGraph(
         CopyTask(
             source: initial, destinationSegment: pointerSegment, destinationIndex: pointerIndex)
     ]
+    var copied = [ObjectKey: CopiedObject]()
     while let task = tasks.popLast() {
         if task.source.isNull {
             try arena.setWord(0, segment: task.destinationSegment, index: task.destinationIndex)
@@ -68,11 +75,23 @@ func copyPointerGraph(
         switch task.source.kind {
         case 0:
             let reader = try task.source.asStruct(depth: 0)
+            let key = ObjectKey(
+                segment: reader.segment, start: reader.dataBitStart / 64, kind: 0)
+            if let existing = copied[key] {
+                try connect(
+                    existing, to: arena, segment: task.destinationSegment,
+                    index: task.destinationIndex)
+                continue
+            }
+            let pointerValue = PointerValue.struct(
+                dataWords: reader.dataWordCount, pointerWords: reader.pointerCount)
             let object = try arena.allocateObject(
                 words: try checkedAdd(reader.dataWordCount, reader.pointerCount),
                 fromPointerIn: task.destinationSegment, at: task.destinationIndex,
-                pointerValue: .struct(
-                    dataWords: reader.dataWordCount, pointerWords: reader.pointerCount))
+                pointerValue: pointerValue)
+            copied[key] = CopiedObject(
+                segment: object.allocation.segmentID, targetStart: object.objectStart,
+                pointerValue: pointerValue)
             try copyBytes(
                 count: reader.dataWordCount * 8,
                 source: reader.state.segments[reader.segment],
@@ -88,14 +107,27 @@ func copyPointerGraph(
             }
         case 1:
             let reader = try task.source.asList(depth: 0)
+            let sourceStart =
+                reader.elementSize == .inlineComposite ? reader.startWord - 1 : reader.startWord
+            let key = ObjectKey(segment: reader.segment, start: sourceStart, kind: 1)
+            if let existing = copied[key] {
+                try connect(
+                    existing, to: arena, segment: task.destinationSegment,
+                    index: task.destinationIndex)
+                continue
+            }
             if reader.elementSize == .inlineComposite {
                 let stride = try checkedAdd(
                     reader.dataWordsPerElement, reader.pointerWordsPerElement)
+                let contentWords = try checkedMultiply(reader.count, stride)
                 let destination = try StructListBuilder.initialize(
                     arena: arena, pointerSegment: task.destinationSegment,
                     pointerIndex: task.destinationIndex, count: reader.count,
                     dataWords: reader.dataWordsPerElement,
                     pointerCount: reader.pointerWordsPerElement)
+                copied[key] = CopiedObject(
+                    segment: destination.segment, targetStart: destination.elementsStart - 1,
+                    pointerValue: .list(size: .inlineComposite, countOrWords: contentWords))
                 for index in 0..<reader.count {
                     let sourceStart = reader.startWord + index * stride
                     let destinationStart = destination.elementsStart + index * stride
@@ -122,6 +154,9 @@ func copyPointerGraph(
                     arena: arena, pointerSegment: task.destinationSegment,
                     pointerIndex: task.destinationIndex, elementSize: reader.elementSize,
                     count: reader.count)
+                copied[key] = CopiedObject(
+                    segment: destination.segment, targetStart: destination.startWord,
+                    pointerValue: .list(size: reader.elementSize, countOrWords: reader.count))
                 if reader.elementSize == .pointer {
                     for index in 0..<reader.count {
                         tasks.append(
@@ -144,6 +179,28 @@ func copyPointerGraph(
             throw CapnProtoError.invalidPointerKind(task.source.kind)
         }
     }
+}
+
+private func connect(
+    _ object: CopiedObject, to arena: BuilderArena, segment: Int, index: Int
+) throws {
+    if object.segment == segment {
+        let offset = try checkedAdd(object.targetStart, -index - 1)
+        try arena.setWord(
+            try object.pointerValue.word(offset: offset), segment: segment, index: index)
+        return
+    }
+
+    let landing = try arena.allocateInSegment(words: 1, segmentID: object.segment)
+    let offset = try checkedAdd(object.targetStart, -landing.startWord - 1)
+    try arena.setWord(
+        try object.pointerValue.word(offset: offset), segment: object.segment,
+        index: landing.startWord)
+    guard object.segment <= Int(UInt32.max), landing.startWord <= 0x1fff_ffff else {
+        throw CapnProtoError.arithmeticOverflow
+    }
+    let far = UInt64(2) | UInt64(landing.startWord) << 3 | UInt64(object.segment) << 32
+    try arena.setWord(far, segment: segment, index: index)
 }
 
 private func copyBytes(

@@ -50,7 +50,11 @@ let package = Package(
         .plugin(name: "CapnProtoPlugin", capability: .buildTool()),
         .testTarget(
             name: "CapnProtoTests", dependencies: ["CapnProto", "CapnProtoTestSupport"]),
-        .testTarget(name: "CapnProtoSchemaTests", dependencies: ["CapnProtoSchema"]),
+        .testTarget(
+            name: "CapnProtoSchemaTests",
+            dependencies: ["CapnProtoSchema"],
+            resources: [.copy("Fixtures")]
+        ),
         .testTarget(name: "CapnProtoRPCTests", dependencies: ["CapnProtoRPC"]),
         .testTarget(name: "CapnProtoNIOTests", dependencies: ["CapnProtoNIO"]),
         .testTarget(name: "CapnProtoCompilerTests", dependencies: ["CapnProtoCompiler"]),

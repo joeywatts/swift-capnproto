@@ -77,6 +77,22 @@ final class BuilderArena {
         return SegmentAllocation(segmentID: segmentID, startWord: start, wordCount: words)
     }
 
+    /// Allocates in a specific existing segment, extending its backing storage
+    /// when necessary. Used for far-pointer landing pads that must reside in the
+    /// target object's segment.
+    func allocateInSegment(words: Int, segmentID: Int) throws -> SegmentAllocation {
+        guard segments.indices.contains(segmentID), words >= 0 else {
+            throw CapnProtoError.arithmeticOverflow
+        }
+        let required = try checkedAdd(segments[segmentID].usedWords, words)
+        if required > segments[segmentID].capacityWords {
+            let additional = try checkedMultiply(
+                required - segments[segmentID].capacityWords, 8)
+            segments[segmentID].bytes.append(contentsOf: repeatElement(0, count: additional))
+        }
+        return consume(words: words, in: segmentID)
+    }
+
     func word(segment: Int, index: Int) throws -> UInt64 {
         guard segments.indices.contains(segment), index >= 0, index < segments[segment].usedWords
         else {
