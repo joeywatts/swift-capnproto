@@ -4,9 +4,11 @@
 [Cap'n Proto](https://capnproto.org/), including serialization, schema-driven
 code generation, reflection, and capability-based RPC.
 
-The project is currently in its foundation phase. The implementation sequence,
-commit boundaries, and upstream-informed verification criteria are described in
-[ROADMAP.md](ROADMAP.md).
+The project has completed the checked wire-format reader milestone. It can read
+trusted or adversarial segment arrays using untyped struct, list, text, and data
+views with nesting and traversal limits. Builders and stream framing remain in
+the next milestone. The implementation sequence, commit boundaries, and
+upstream-informed verification criteria are described in [ROADMAP.md](ROADMAP.md).
 
 ## Intended products
 

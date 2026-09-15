@@ -57,6 +57,22 @@ public struct StructReader {
         return stored ^ defaultValue
     }
 
+    public func float32(atByte offset: Int, default defaultValue: Float = 0) throws -> Float {
+        let bits = try integer(
+            atByte: offset, as: UInt32.self, default: defaultValue.bitPattern)
+        return Float(bitPattern: bits)
+    }
+
+    public func float64(atByte offset: Int, default defaultValue: Double = 0) throws -> Double {
+        let bits = try integer(
+            atByte: offset, as: UInt64.self, default: defaultValue.bitPattern)
+        return Double(bitPattern: bits)
+    }
+
+    public func discriminant(atByte offset: Int) throws -> UInt16 {
+        try integer(atByte: offset, as: UInt16.self)
+    }
+
     public func structField(at index: Int) throws -> StructReader {
         try pointer(at: index).asStruct(depth: depth + 1)
     }
@@ -116,6 +132,12 @@ public struct ListReader {
 
     public func bool(at index: Int) throws -> Bool {
         try checkIndex(index)
+        if elementSize == .inlineComposite {
+            guard dataWordsPerElement > 0 else { return false }
+            let stride = try checkedAdd(dataWordsPerElement, pointerWordsPerElement)
+            let word = try checkedAdd(startWord, try checkedMultiply(index, stride))
+            return state.segments[segment][word * 8] & 1 != 0
+        }
         guard elementSize == .bit else {
             throw CapnProtoError.typeMismatch(expected: "bit list", actual: "\(elementSize)")
         }
@@ -134,6 +156,13 @@ public struct ListReader {
         case 8: expected = .eightBytes
         default: throw CapnProtoError.typeMismatch(expected: "wire scalar", actual: "\(T.self)")
         }
+        if elementSize == .inlineComposite {
+            guard dataWordsPerElement * 8 >= MemoryLayout<T>.size else { return 0 }
+            let stride = try checkedAdd(dataWordsPerElement, pointerWordsPerElement)
+            let word = try checkedAdd(startWord, try checkedMultiply(index, stride))
+            return try LittleEndian.loadInteger(
+                T.self, from: state.segments[segment], at: try checkedMultiply(word, 8))
+        }
         guard elementSize == expected else {
             throw CapnProtoError.typeMismatch(
                 expected: "\(expected) list", actual: "\(elementSize)")
@@ -141,6 +170,14 @@ public struct ListReader {
         let relative = try checkedMultiply(index, MemoryLayout<T>.size)
         let absolute = try checkedAdd(try checkedMultiply(startWord, 8), relative)
         return try LittleEndian.loadInteger(T.self, from: state.segments[segment], at: absolute)
+    }
+
+    public func float32(at index: Int) throws -> Float {
+        Float(bitPattern: try integer(at: index, as: UInt32.self))
+    }
+
+    public func float64(at index: Int) throws -> Double {
+        Double(bitPattern: try integer(at: index, as: UInt64.self))
     }
 
     public func pointerElement(at index: Int) throws -> ListReader {
@@ -218,6 +255,18 @@ public struct ListReader {
 
     private func pointer(at index: Int) throws -> ResolvedPointer {
         try checkIndex(index)
+        if elementSize == .inlineComposite {
+            guard pointerWordsPerElement > 0 else {
+                return ResolvedPointer(
+                    state: state, segment: segment, pointerIndex: 0, raw: 0,
+                    targetOverride: nil)
+            }
+            let stride = try checkedAdd(dataWordsPerElement, pointerWordsPerElement)
+            let element = try checkedAdd(startWord, try checkedMultiply(index, stride))
+            return try resolvePointer(
+                state: state, segment: segment,
+                pointerIndex: try checkedAdd(element, dataWordsPerElement))
+        }
         guard elementSize == .pointer else {
             throw CapnProtoError.typeMismatch(expected: "pointer list", actual: "\(elementSize)")
         }
