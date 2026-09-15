@@ -25,13 +25,19 @@ let package = Package(
         .target(name: "CapnProtoNIO", dependencies: ["CapnProtoRPC"]),
         .target(name: "CapnProtoCompiler", dependencies: ["CapnProto", "CapnProtoSchema"]),
         .target(
+            name: "CapnProtoConformance",
+            dependencies: ["CapnProto"],
+            path: "Tests/Generated/CapnpTest"
+        ),
+        .target(
             name: "CapnProtoTestSupport",
             dependencies: ["CapnProto"],
             path: "Tests/Support"
         ),
         .executableTarget(name: "capnpc-swift", dependencies: ["CapnProtoCompiler"]),
         .executableTarget(name: "capnp-swift", dependencies: ["CapnProtoCompiler"]),
-        .executableTarget(name: "capnp-test-swift", dependencies: ["CapnProto"]),
+        .executableTarget(
+            name: "capnp-test-swift", dependencies: ["CapnProto", "CapnProtoConformance"]),
         .executableTarget(
             name: "capnp-fuzz-message",
             dependencies: ["CapnProtoTestSupport"],
@@ -59,7 +65,7 @@ let package = Package(
         .testTarget(name: "CapnProtoNIOTests", dependencies: ["CapnProtoNIO"]),
         .testTarget(
             name: "CapnProtoCompilerTests",
-            dependencies: ["CapnProtoCompiler"],
+            dependencies: ["CapnProtoCompiler", "CapnProtoConformance"],
             resources: [.copy("Fixtures")]
         ),
         .testTarget(name: "CapnProtoTestSupportTests", dependencies: ["CapnProtoTestSupport"]),

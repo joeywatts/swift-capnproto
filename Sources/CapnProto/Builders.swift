@@ -417,6 +417,17 @@ public struct ListBuilder {
             pointerCount: pointerCount)
     }
 
+    public func setData(at index: Int, to bytes: [UInt8]) throws {
+        let child = try initList(at: index, elementSize: .byte, count: bytes.count)
+        try DataBuilder(list: child).setBytes(bytes)
+    }
+
+    public func setText(at index: Int, to text: String) throws {
+        let bytes = Array(text.utf8)
+        let child = try initList(at: index, elementSize: .byte, count: bytes.count + 1)
+        try TextBuilder(data: DataBuilder(list: child)).setUTF8(bytes)
+    }
+
     /// Applies the wire-format primitive/pointer-list to struct-list upgrade
     /// rule while preserving each old element as field zero.
     public func upgradeToStructList(dataWords: Int, pointerCount: Int) throws -> StructListBuilder {

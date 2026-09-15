@@ -286,6 +286,8 @@ public enum Schema {
         public var textValue: String { get throws { try text(value, 0) } }
         public var dataValue: [UInt8] { get throws { try value.dataField(at: 0).bytes } }
         public var enumValue: UInt16 { get throws { try value.integer(atByte: 2) } }
+        public var structValue: StructReader { get throws { try value.structField(at: 0) } }
+        public var listValue: ListReader { get throws { try value.listField(at: 0) } }
     }
 
     public struct RequestedFile {

@@ -298,3 +298,21 @@ extension StructReader {
             pointerCount: root.pointerCount)
     }
 }
+
+extension StructBuilder {
+    /// Copies a struct into an already-allocated destination, preserving fields
+    /// that fit and deeply copying its pointer graph.
+    public func copyContent(from source: StructReader) throws {
+        let dataWords = min(dataWordCount, source.dataWordCount)
+        try copyBytes(
+            count: dataWords * 8, source: source.state.segments[source.segment],
+            sourceOffset: source.dataBitStart / 8, arena: arena, destinationSegment: segment,
+            destinationOffset: dataStart * 8)
+        for index in 0..<min(pointerCount, source.pointerCount) {
+            try clearPointer(at: index)
+            try copyPointerGraph(
+                source: .resolved(try source.pointer(at: index)), to: arena,
+                pointerSegment: segment, pointerIndex: try pointerIndex(index))
+        }
+    }
+}

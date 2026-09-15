@@ -102,6 +102,10 @@ public struct StructReader {
         try !pointer(at: index).isNull
     }
 
+    public func anyPointerField(at index: Int) throws -> AnyPointerReader {
+        AnyPointerReader(pointer: try pointer(at: index), depth: depth + 1)
+    }
+
     func pointer(at index: Int) throws -> ResolvedPointer {
         guard index >= 0 else {
             throw CapnProtoError.indexOutOfBounds(index: index, count: pointerCount)
@@ -210,6 +214,10 @@ public struct ListReader {
         try pointer(at: index).asStruct(depth: depth + 1)
     }
 
+    public func anyPointerElement(at index: Int) throws -> AnyPointerReader {
+        AnyPointerReader(pointer: try pointer(at: index), depth: depth + 1)
+    }
+
     /// Reads an inline-composite element, or applies Cap'n Proto's primitive/pointer-list
     /// to struct-list evolution rule.
     public func structElement(at index: Int) throws -> StructReader {
@@ -300,6 +308,20 @@ public struct ListReader {
             throw CapnProtoError.indexOutOfBounds(index: index, count: count)
         }
     }
+}
+
+public struct AnyPointerReader {
+    private let pointer: ResolvedPointer
+    private let depth: Int
+
+    init(pointer: ResolvedPointer, depth: Int) {
+        self.pointer = pointer
+        self.depth = depth
+    }
+
+    public var isNull: Bool { pointer.isNull }
+    public func asStruct() throws -> StructReader { try pointer.asStruct(depth: depth) }
+    public func asList() throws -> ListReader { try pointer.asList(depth: depth) }
 }
 
 public struct DataReader {
