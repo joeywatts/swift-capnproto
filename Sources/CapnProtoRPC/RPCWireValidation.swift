@@ -13,6 +13,7 @@ public enum RPCProtocolError: Error, Equatable, Sendable {
     case unknownCapability(UInt32)
     case invalidReferenceCount
     case invalidTransform
+    case promiseResolutionLoop
     case unsupportedThirdPartyCapability
     case embargoMismatch(UInt32)
     case messageTooLarge
@@ -25,8 +26,11 @@ public struct RPCWireValidationState: Equatable, Sendable {
     public var outboundQuestions: Set<UInt32> = []
     public var returnedQuestions: Set<UInt32> = []
     public var cancelledOutboundQuestions: Set<UInt32> = []
+    public var outboundTailQuestions: Set<UInt32> = []
     public var exports: Set<UInt32> = []
     public var imports: Set<UInt32> = []
+    public var unresolvedPromiseImports: Set<UInt32> = []
+    public var releasedPromiseImports: Set<UInt32> = []
     public var senderLoopbackEmbargoes: Set<UInt32> = []
     public var receiverLoopbackEmbargoes: Set<UInt32> = []
 
@@ -90,9 +94,13 @@ public enum RPCWireValidator {
             }
             switch try result.which {
             case .results(let payload): try validatePayload(payload, state: next)
-            case .exception, .canceled, .resultsSentElsewhere: break
+            case .exception, .canceled: break
+            case .resultsSentElsewhere:
+                guard next.outboundTailQuestions.remove(id) != nil else {
+                    throw RPCProtocolError.unknownQuestion(id)
+                }
             case .takeFromOtherQuestion(let other):
-                guard next.outboundQuestions.contains(other), other != id else {
+                guard next.inboundQuestions.contains(other) else {
                     throw RPCProtocolError.unknownQuestion(other)
                 }
             case .acceptFromThirdParty:
@@ -112,7 +120,11 @@ public enum RPCWireValidator {
             guard next.exports.contains(id) else { throw RPCProtocolError.unknownCapability(id) }
         case .resolve(let resolve):
             let id = try resolve.promiseId
-            guard next.imports.contains(id) else { throw RPCProtocolError.unknownCapability(id) }
+            guard next.imports.contains(id) || next.releasedPromiseImports.contains(id) else {
+                throw RPCProtocolError.unknownCapability(id)
+            }
+            next.unresolvedPromiseImports.remove(id)
+            next.releasedPromiseImports.remove(id)
             switch try resolve.which {
             case .cap(let descriptor): try validateDescriptor(descriptor, state: next)
             case .exception: break
@@ -121,12 +133,12 @@ public enum RPCWireValidator {
         case .disembargo(let disembargo):
             switch try disembargo.context.which {
             case .senderLoopback(let id):
-                guard next.senderLoopbackEmbargoes.remove(id) != nil else {
+                try validateTarget(try disembargo.target, state: next)
+                guard next.receiverLoopbackEmbargoes.insert(id).inserted else {
                     throw RPCProtocolError.embargoMismatch(id)
                 }
             case .receiverLoopback(let id):
-                try validateTarget(try disembargo.target, state: next)
-                guard next.receiverLoopbackEmbargoes.insert(id).inserted else {
+                guard next.senderLoopbackEmbargoes.remove(id) != nil else {
                     throw RPCProtocolError.embargoMismatch(id)
                 }
             case .accept, .provide:
@@ -174,6 +186,12 @@ public enum RPCWireValidator {
         case .receiverAnswer(let answer):
             guard state.inboundQuestions.contains(try answer.questionId) else {
                 throw RPCProtocolError.unknownAnswer(try answer.questionId)
+            }
+            for operation in try answer.transform {
+                switch try operation.which {
+                case .noop, .getPointerField: break
+                case .unknown: throw RPCProtocolError.invalidTransform
+                }
             }
         case .thirdPartyHosted: throw RPCProtocolError.unsupportedThirdPartyCapability
         case .unknown(let tag): throw RPCProtocolError.unknownMessageVariant(tag)

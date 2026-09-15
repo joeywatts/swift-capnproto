@@ -88,6 +88,13 @@ public protocol CapabilityCallTargetWithCaps: CapabilityCallTarget {
     ) async throws -> CapabilityCallResult
 }
 
+/// Supplies schema method metadata to the wire dispatcher. This is used to
+/// apply streaming flow control without serializing unrelated ordinary calls.
+public protocol CapabilityMethodLookupTarget: CapabilityCallTarget {
+    func methodDescriptor(interfaceID: UInt64, methodID: UInt16)
+        -> CapabilityMethodDescriptor?
+}
+
 extension CapabilityCallTarget {
     public func supports(interfaceID: UInt64) -> Bool { true }
 }
@@ -127,15 +134,26 @@ public struct CapabilityResponseContext {
 }
 
 /// A local target backed by a generated or hand-written dispatch closure.
-public final class LocalCapabilityTarget: CapabilityCallTarget, @unchecked Sendable {
+public final class LocalCapabilityTarget: CapabilityMethodLookupTarget, @unchecked Sendable {
     public typealias Handler = (CapabilityRequestContext) async throws -> StructReader
 
     private let interfaceIDs: Set<UInt64>
+    private let methods: [CapabilityMethodDescriptor]
     private let handler: Handler
 
-    public init(interfaceIDs: Set<UInt64>, handler: @escaping Handler) {
+    public init(
+        interfaceIDs: Set<UInt64>, methods: [CapabilityMethodDescriptor] = [],
+        handler: @escaping Handler
+    ) {
         self.interfaceIDs = interfaceIDs
+        self.methods = methods
         self.handler = handler
+    }
+
+    public func methodDescriptor(interfaceID: UInt64, methodID: UInt16)
+        -> CapabilityMethodDescriptor?
+    {
+        methods.first { $0.interfaceID == interfaceID && $0.methodID == methodID }
     }
 
     public func supports(interfaceID: UInt64) -> Bool {

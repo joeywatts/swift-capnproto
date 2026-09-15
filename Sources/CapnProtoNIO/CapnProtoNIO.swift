@@ -130,6 +130,12 @@ public final class NIORPCTransport: RPCMessageTransport, @unchecked Sendable {
 
     public func receive() async throws -> [UInt8]? { try await mailbox.next() }
 
+    /// Closes only this endpoint's write side. The peer observes EOF after all
+    /// queued bytes while its reverse direction remains usable.
+    public func halfCloseOutput() async throws {
+        try await channel.close(mode: .output).get()
+    }
+
     public func close() async {
         try? await channel.close().get()
         await mailbox.finish()

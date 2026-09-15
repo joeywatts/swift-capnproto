@@ -15,6 +15,57 @@ private func wireValue(_ value: UInt32) throws -> StructReader {
     return try message.asReader().rootStruct()
 }
 
+private final class SwitchableFailTransport: RPCMessageTransport, @unchecked Sendable {
+    private let base: any RPCMessageTransport
+    private let lock = NSLock()
+    private var shouldFailCall = false
+
+    init(_ base: any RPCMessageTransport) { self.base = base }
+    func failNextCall() { lock.withLock { shouldFailCall = true } }
+    func send(_ bytes: [UInt8]) async throws {
+        let isCall: Bool
+        if let message = try? RPCWireValidator.decode(bytes),
+            case .call = try? message.which
+        {
+            isCall = true
+        } else {
+            isCall = false
+        }
+        let fail = lock.withLock {
+            guard shouldFailCall, isCall else { return false }
+            shouldFailCall = false
+            return true
+        }
+        if fail { throw RPCTransportError.injected(operation: 0) }
+        try await base.send(bytes)
+    }
+    func receive() async throws -> [UInt8]? { try await base.receive() }
+    func close() async { await base.close() }
+}
+
+private final class ReceiverAnswerProbeTransport: RPCMessageTransport, @unchecked Sendable {
+    private let base: any RPCMessageTransport
+    private let lock = NSLock()
+    private var observedReceiverAnswer = false
+
+    init(_ base: any RPCMessageTransport) { self.base = base }
+
+    func send(_ bytes: [UInt8]) async throws {
+        if let message = try? RPCWireValidator.decode(bytes),
+            case .call(let call) = try? message.which,
+            let descriptor = try? call.params.capTable.first,
+            case .receiverAnswer = try? descriptor.which
+        {
+            lock.withLock { observedReceiverAnswer = true }
+        }
+        try await base.send(bytes)
+    }
+
+    func receive() async throws -> [UInt8]? { try await base.receive() }
+    func close() async { await base.close() }
+    var observed: Bool { lock.withLock { observedReceiverAnswer } }
+}
+
 private final class WireService: CapabilityCallTarget, @unchecked Sendable {
     private let lock = NSLock()
     private var receivedValues: [UInt32] = []
@@ -136,9 +187,20 @@ private actor NeverReturnWireService: CapabilityCallTarget {
     await server.close()
 }
 
-private actor StreamingProbe: CapabilityCallTarget {
+private actor StreamingProbe: CapabilityMethodLookupTarget {
     private var active = 0
     private(set) var maximumActive = 0
+
+    nonisolated func methodDescriptor(interfaceID: UInt64, methodID: UInt16)
+        -> CapabilityMethodDescriptor?
+    {
+        guard interfaceID == wireMethod.interfaceID, methodID == wireMethod.methodID else {
+            return nil
+        }
+        return CapabilityMethodDescriptor(
+            interfaceID: interfaceID, methodID: methodID, name: "stream",
+            paramStructID: 1, resultStructID: 2, isStreaming: true)
+    }
 
     func call(_ method: CapabilityMethodDescriptor, params: StructReader) async throws
         -> StructReader
@@ -147,6 +209,32 @@ private actor StreamingProbe: CapabilityCallTarget {
         maximumActive = max(maximumActive, active)
         await Task.yield()
         active -= 1
+        return params
+    }
+}
+
+private actor StreamingFailureProbe: CapabilityMethodLookupTarget {
+    let gate = WireGate()
+    private(set) var values: [UInt32] = []
+
+    nonisolated func methodDescriptor(interfaceID: UInt64, methodID: UInt16)
+        -> CapabilityMethodDescriptor?
+    {
+        guard interfaceID == wireMethod.interfaceID, methodID == wireMethod.methodID else {
+            return nil
+        }
+        return CapabilityMethodDescriptor(
+            interfaceID: interfaceID, methodID: methodID, name: "stream",
+            paramStructID: 1, resultStructID: 2, isStreaming: true)
+    }
+
+    func call(_ method: CapabilityMethodDescriptor, params: StructReader) async throws
+        -> StructReader
+    {
+        let value = try params.integer(atByte: 0, as: UInt32.self)
+        values.append(value)
+        if value == 1 { await gate.wait() }
+        if value == 2 { throw RemoteException(kind: .overloaded, reason: "stream failed") }
         return params
     }
 }
@@ -165,6 +253,53 @@ private final class CapabilityPassingService: CapabilityCallTargetWithCaps, @unc
         let callback = try #require(capabilities.first)
         let callbackResult = try await callback.call(wireMethod, params: params)
         return CapabilityCallResult(results: callbackResult, capabilities: [callback])
+    }
+}
+
+private final class ReceiverAnswerService: CapabilityCallTargetWithCaps, @unchecked Sendable {
+    func call(_ method: CapabilityMethodDescriptor, params: StructReader) async throws
+        -> StructReader
+    {
+        try wireValue(try params.integer(atByte: 0, as: UInt32.self) + 1)
+    }
+
+    func call(
+        _ method: CapabilityMethodDescriptor, params: StructReader,
+        capabilities: [CapabilityClient]
+    ) async throws -> CapabilityCallResult {
+        let callback = try #require(capabilities.first)
+        return CapabilityCallResult(results: try await callback.call(method, params: params))
+    }
+}
+
+private final class ReceiverAnswerTransformService: CapabilityCallTargetWithCaps,
+    @unchecked Sendable
+{
+    let gate: WireGate
+    let returned: CapabilityClient
+
+    init(gate: WireGate, returned: CapabilityClient) {
+        self.gate = gate
+        self.returned = returned
+    }
+
+    func call(_ method: CapabilityMethodDescriptor, params: StructReader) async throws
+        -> StructReader
+    { throw CapabilityError.unserializableCapability }
+
+    func call(
+        _ method: CapabilityMethodDescriptor, params: StructReader,
+        capabilities: [CapabilityClient]
+    ) async throws -> CapabilityCallResult {
+        if let callback = capabilities.first {
+            return CapabilityCallResult(results: try await callback.call(method, params: params))
+        }
+        await gate.wait()
+        let message = try MessageBuilder()
+        let root = try message.initRootStruct(dataWords: 0, pointerCount: 1)
+        try root.setCapabilityField(at: 0, tableIndex: 0)
+        return CapabilityCallResult(
+            results: try message.asReader().rootStruct(), capabilities: [returned])
     }
 }
 
@@ -226,6 +361,76 @@ private final class PromiseFactoryService: CapabilityCallTargetWithCaps, @unchec
     }
 }
 
+private final class RedirectPromiseFactoryService: CapabilityCallTargetWithCaps, @unchecked Sendable
+{
+    let first = CapabilityClient.makePromise()
+    let second = CapabilityClient.makePromise()
+
+    func call(_ method: CapabilityMethodDescriptor, params: StructReader) async throws
+        -> StructReader
+    { throw CapabilityError.unserializableCapability }
+
+    func call(
+        _ method: CapabilityMethodDescriptor, params: StructReader,
+        capabilities: [CapabilityClient]
+    ) async throws -> CapabilityCallResult {
+        let message = try MessageBuilder()
+        let root = try message.initRootStruct(dataWords: 0, pointerCount: 1)
+        try root.setCapabilityField(at: 0, tableIndex: 0)
+        return CapabilityCallResult(
+            results: try message.asReader().rootStruct(), capabilities: [first.client])
+    }
+}
+
+private final class PromiseCaptureService: CapabilityCallTargetWithCaps, @unchecked Sendable {
+    private let lock = NSLock()
+    private var captured: CapabilityClient?
+
+    func call(_ method: CapabilityMethodDescriptor, params: StructReader) async throws
+        -> StructReader
+    { throw CapabilityError.unserializableCapability }
+
+    func call(
+        _ method: CapabilityMethodDescriptor, params: StructReader,
+        capabilities: [CapabilityClient]
+    ) async throws -> CapabilityCallResult {
+        let capability = try #require(capabilities.first)
+        lock.withLock {
+            if captured == nil { captured = capability }
+        }
+        return CapabilityCallResult(results: params)
+    }
+
+    var capability: CapabilityClient? { lock.withLock { captured } }
+    func clear() { lock.withLock { captured = nil } }
+}
+
+private final class LoopbackPromiseService: CapabilityCallTargetWithCaps, @unchecked Sendable {
+    private let lock = NSLock()
+    private var captured: CapabilityClient?
+    private let promise = CapabilityClient.makePromise()
+
+    func call(_ method: CapabilityMethodDescriptor, params: StructReader) async throws
+        -> StructReader
+    { throw CapabilityError.unserializableCapability }
+
+    func call(
+        _ method: CapabilityMethodDescriptor, params: StructReader,
+        capabilities: [CapabilityClient]
+    ) async throws -> CapabilityCallResult {
+        lock.withLock { captured = capabilities.first }
+        let message = try MessageBuilder()
+        let root = try message.initRootStruct(dataWords: 0, pointerCount: 1)
+        try root.setCapabilityField(at: 0, tableIndex: 0)
+        return CapabilityCallResult(
+            results: try message.asReader().rootStruct(), capabilities: [promise.client])
+    }
+
+    func resolveBackToCaller() throws {
+        try promise.resolver.resolve(to: #require(lock.withLock { captured }))
+    }
+}
+
 // Adapts Rpc.SendCap and Rpc.ReturnCap from rpc-test.c++ at the pinned upstream
 // commit, exercising parameter and result cap-table adoption in both directions.
 @Test func capabilitiesPassInParametersAndResults() async throws {
@@ -246,6 +451,66 @@ private final class PromiseFactoryService: CapabilityCallTargetWithCaps, @unchec
     let second = try await returned.call(wireMethod, params: wireValue(8))
     #expect(try second.integer(atByte: 0, as: UInt32.self) == 9)
     #expect(callback.values == [5, 8])
+    await client.close()
+    await server.close()
+}
+
+@Test func receiverAnswerCapabilityTableEntryResolvesWithoutProxyExport() async throws {
+    let (rawClient, serverTransport) = InMemoryRPCTransport.makePair(
+        configuration: .init(fragmentSize: 3))
+    let clientTransport = ReceiverAnswerProbeTransport(rawClient)
+    let client = TwoPartyRPCConnection(side: .client, transport: clientTransport)
+    let server = TwoPartyRPCConnection(
+        side: .server, transport: serverTransport,
+        bootstrap: CapabilityClient(target: ReceiverAnswerService()))
+    await client.start()
+    await server.start()
+
+    let bootstrap = try await client.beginBootstrap()
+    let pipeline = bootstrap.pipeline()
+    let result = try await pipeline.call(
+        wireMethod, params: wireValue(14), capabilities: [pipeline])
+    #expect(try result.results.integer(atByte: 0, as: UInt32.self) == 15)
+    #expect(clientTransport.observed)
+    _ = try await bootstrap.response()
+
+    await client.close()
+    await server.close()
+}
+
+@Test func receiverAnswerTransformWaitsForTheReferencedResult() async throws {
+    let gate = WireGate()
+    let callback = WireService()
+    let service = ReceiverAnswerTransformService(
+        gate: gate, returned: CapabilityClient(target: callback))
+    let (rawClient, serverTransport) = InMemoryRPCTransport.makePair(
+        configuration: .init(fragmentSize: 2))
+    let clientTransport = ReceiverAnswerProbeTransport(rawClient)
+    let client = TwoPartyRPCConnection(side: .client, transport: clientTransport)
+    let server = TwoPartyRPCConnection(
+        side: .server, transport: serverTransport,
+        bootstrap: CapabilityClient(target: service))
+    await client.start()
+    await server.start()
+
+    let remote = try await client.bootstrap()
+    let parent = Task {
+        try await remote.call(wireMethod, params: wireValue(0), capabilities: [])
+    }
+    while (await client.snapshot).questions < 1 { await Task.yield() }
+    let promisedCallback = await client.pipeline(questionID: 1, pointerFields: [0])
+    let child = Task {
+        try await remote.call(
+            wireMethod, params: wireValue(20), capabilities: [promisedCallback])
+    }
+    while (await client.snapshot).questions < 2 { await Task.yield() }
+    await gate.open()
+
+    _ = try await parent.value
+    #expect(try await child.value.results.integer(atByte: 0, as: UInt32.self) == 21)
+    #expect(clientTransport.observed)
+    #expect(callback.values == [20])
+
     await client.close()
     await server.close()
 }
@@ -318,18 +583,101 @@ private final class PromiseFactoryService: CapabilityCallTargetWithCaps, @unchec
     await rejectedServer.close()
 }
 
-private final class TailCallService: CapabilityCallTarget, @unchecked Sendable {
-    let gate = WireGate()
+@Test func senderPromiseRedirectChainResolvesAcrossTheWire() async throws {
+    let factory = RedirectPromiseFactoryService()
+    let target = WireService()
+    let (a, b) = InMemoryRPCTransport.makePair()
+    let client = TwoPartyRPCConnection(side: .client, transport: a)
+    let server = TwoPartyRPCConnection(
+        side: .server, transport: b, bootstrap: CapabilityClient(target: factory))
+    await client.start()
+    await server.start()
+    let remote = try await client.bootstrap()
+    let response = try await remote.call(
+        wireMethod, params: wireValue(0), capabilities: [])
+    let redirected = try #require(response.capabilities.first)
+    let call = Task { try await redirected.call(wireMethod, params: wireValue(50)) }
+    try factory.first.resolver.resolve(to: factory.second.client)
+    try factory.second.resolver.resolve(to: CapabilityClient(target: target))
+    #expect(try await call.value.integer(atByte: 0, as: UInt32.self) == 51)
+    await client.close()
+    await server.close()
+}
+
+// Ports rpc-test.c++'s "export the same promise twice": identity is reused,
+// references accumulate on one table entry, and one Resolve covers both sends.
+@Test func exportingTheSamePromiseTwiceReusesOneReferenceCountedEntry() async throws {
+    let capture = PromiseCaptureService()
+    let promise = CapabilityClient.makePromise()
+    let resolvedTarget = WireService()
+    let (a, b) = InMemoryRPCTransport.makePair()
+    let client = TwoPartyRPCConnection(side: .client, transport: a)
+    let server = TwoPartyRPCConnection(
+        side: .server, transport: b, bootstrap: CapabilityClient(target: capture))
+    await client.start()
+    await server.start()
+    let remote = try await client.bootstrap()
+
+    _ = try await remote.call(
+        wireMethod, params: wireValue(1), capabilities: [promise.client])
+    _ = try await remote.call(
+        wireMethod, params: wireValue(2), capabilities: [promise.client])
+    #expect((await client.snapshot).exports == 1)
+    #expect((await server.snapshot).imports == 1)
+
+    do {
+        let importedPromise = try #require(capture.capability)
+        let queued = Task { try await importedPromise.call(wireMethod, params: wireValue(40)) }
+        try promise.resolver.resolve(to: CapabilityClient(target: resolvedTarget))
+        #expect(try await queued.value.integer(atByte: 0, as: UInt32.self) == 41)
+        #expect((await server.snapshot).imports == 2)
+    }
+    capture.clear()
+    for _ in 0..<100 where (await server.snapshot).imports != 0 { await Task.yield() }
+    #expect((await server.snapshot).imports == 0)
+
+    await client.close()
+    await server.close()
+}
+
+@Test func failedCallSendRollsBackParameterCapabilityExports() async throws {
+    let (rawClient, serverTransport) = InMemoryRPCTransport.makePair()
+    let clientTransport = SwitchableFailTransport(rawClient)
+    let client = TwoPartyRPCConnection(side: .client, transport: clientTransport)
+    let server = TwoPartyRPCConnection(
+        side: .server, transport: serverTransport,
+        bootstrap: CapabilityClient(target: CapabilityPassingService()))
+    await client.start()
+    await server.start()
+    let remote = try await client.bootstrap()
+    clientTransport.failNextCall()
+    await #expect(throws: RPCTransportError.injected(operation: 0)) {
+        _ = try await remote.call(
+            wireMethod, params: wireValue(1),
+            capabilities: [CapabilityClient(target: WireService())])
+    }
+    #expect((await client.snapshot).exports == 0)
+    await client.close()
+    await server.close()
+}
+
+private final class TailCallService: CapabilityCallTargetWithCaps, @unchecked Sendable {
+    weak var connection: TwoPartyRPCConnection?
 
     func call(_ method: CapabilityMethodDescriptor, params: StructReader) async throws
         -> StructReader
-    {
-        let value = try params.integer(atByte: 0, as: UInt32.self)
-        if value == 2 {
-            await gate.wait()
-            return try wireValue(101)
-        }
-        throw RPCTailCall(questionID: 2)
+    { throw CapabilityError.unserializableCapability }
+
+    func call(
+        _ method: CapabilityMethodDescriptor, params: StructReader,
+        capabilities: [CapabilityClient]
+    ) async throws -> CapabilityCallResult {
+        let connection = try #require(connection)
+        let callback = try #require(capabilities.first)
+        let importID = try #require(callback.tableIndex)
+        let questionID = try await connection.beginTailCall(
+            importID: importID, method: method, params: params)
+        throw RPCTailCall(questionID: questionID)
     }
 }
 
@@ -339,18 +687,40 @@ private final class TailCallService: CapabilityCallTarget, @unchecked Sendable {
     let client = TwoPartyRPCConnection(side: .client, transport: a)
     let server = TwoPartyRPCConnection(
         side: .server, transport: b, bootstrap: CapabilityClient(target: service))
+    service.connection = server
     await client.start()
     await server.start()
     let remote = try await client.bootstrap()
+    let response = try await remote.call(
+        wireMethod, params: wireValue(100),
+        capabilities: [CapabilityClient(target: WireService())])
+    #expect(try response.results.integer(atByte: 0, as: UInt32.self) == 101)
 
-    let tail = Task { try await remote.call(wireMethod, params: wireValue(1)) }
-    while (await client.snapshot).questions < 1 { await Task.yield() }
-    let callee = Task { try await remote.call(wireMethod, params: wireValue(2)) }
-    while (await client.snapshot).questions < 2 { await Task.yield() }
-    await service.gate.open()
-    #expect(try await callee.value.integer(atByte: 0, as: UInt32.self) == 101)
-    #expect(try await tail.value.integer(atByte: 0, as: UInt32.self) == 101)
+    await client.close()
+    await server.close()
+}
 
+@Test func cancellingTailCallCancelsReverseDirectionCallee() async throws {
+    let service = TailCallService()
+    let callback = NeverReturnWireService()
+    let (a, b) = InMemoryRPCTransport.makePair()
+    let client = TwoPartyRPCConnection(side: .client, transport: a)
+    let server = TwoPartyRPCConnection(
+        side: .server, transport: b, bootstrap: CapabilityClient(target: service))
+    service.connection = server
+    await client.start()
+    await server.start()
+    let remote = try await client.bootstrap()
+    let call = Task {
+        try await remote.call(
+            wireMethod, params: wireValue(1),
+            capabilities: [CapabilityClient(target: callback)])
+    }
+    while (await client.snapshot).answers == 0 { await Task.yield() }
+    call.cancel()
+    await #expect(throws: CapabilityError.cancelled) { _ = try await call.value }
+    while !(await callback.cancelled) { await Task.yield() }
+    #expect((await client.snapshot).answers == 0)
     await client.close()
     await server.close()
 }
@@ -377,10 +747,39 @@ private final class TailCallService: CapabilityCallTarget, @unchecked Sendable {
     await server.close()
 }
 
+@Test func streamingFailureCascadesToQueuedFollowersWithoutDispatch() async throws {
+    let service = StreamingFailureProbe()
+    let (a, b) = InMemoryRPCTransport.makePair()
+    let client = TwoPartyRPCConnection(side: .client, transport: a)
+    let server = TwoPartyRPCConnection(
+        side: .server, transport: b, bootstrap: CapabilityClient(target: service))
+    await client.start()
+    await server.start()
+    let remote = try await client.bootstrap()
+
+    let first = Task { try await remote.call(wireMethod, params: wireValue(1)) }
+    while (await client.snapshot).questions < 1 { await Task.yield() }
+    let failing = Task { try await remote.call(wireMethod, params: wireValue(2)) }
+    while (await client.snapshot).questions < 2 { await Task.yield() }
+    let follower = Task { try await remote.call(wireMethod, params: wireValue(3)) }
+    while (await client.snapshot).questions < 3 { await Task.yield() }
+    await service.gate.open()
+
+    _ = try await first.value
+    let failure = CapabilityError.broken(
+        RemoteException(kind: .overloaded, reason: "stream failed"))
+    await #expect(throws: failure) { _ = try await failing.value }
+    await #expect(throws: failure) { _ = try await follower.value }
+    #expect(await service.values == [1, 2])
+    await client.close()
+    await server.close()
+}
+
 // Adapts the sender/receiver-loopback disembargo and call-order regressions in
 // rpc-test.c++ at the pinned upstream commit above.
 @Test func disembargoFormsAnOrderingBarrierBetweenCalls() async throws {
-    let service = WireService()
+    let service = LoopbackPromiseService()
+    let callback = WireService()
     let (a, b) = InMemoryRPCTransport.makePair(configuration: .init(fragmentSize: 2))
     let client = TwoPartyRPCConnection(side: .client, transport: a)
     let server = TwoPartyRPCConnection(
@@ -388,12 +787,17 @@ private final class TailCallService: CapabilityCallTarget, @unchecked Sendable {
     await client.start()
     await server.start()
     let remote = try await client.bootstrap()
-    let id = try #require(remote.tableIndex)
+    let response = try await remote.call(
+        wireMethod, params: wireValue(0),
+        capabilities: [CapabilityClient(target: callback)])
+    let loopbackPromise = try #require(response.capabilities.first)
+    try service.resolveBackToCaller()
 
-    _ = try await remote.call(wireMethod, params: wireValue(1))
+    let id = try #require(loopbackPromise.tableIndex)
+    _ = try await loopbackPromise.call(wireMethod, params: wireValue(1))
     try await client.establishOrderingBarrier(for: id)
-    _ = try await remote.call(wireMethod, params: wireValue(2))
-    #expect(service.values == [1, 2])
+    _ = try await loopbackPromise.call(wireMethod, params: wireValue(2))
+    #expect(callback.values == [1, 2])
     #expect((await client.snapshot).embargoes == 0)
     #expect((await server.snapshot).embargoes == 0)
     await client.close()

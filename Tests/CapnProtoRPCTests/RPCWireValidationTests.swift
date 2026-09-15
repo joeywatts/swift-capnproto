@@ -86,6 +86,7 @@ private func rpcBytes(_ configure: (Message.Builder) throws -> Void) throws -> [
 @Test func validatorAcceptsTailCallsAndLateCancellationReturns() throws {
     var state = RPCWireValidationState()
     state.outboundQuestions = [1, 2]
+    state.inboundQuestions = [1]
     let tail = try rpcBytes { root in
         let value = try root.initReturn()
         try value.setAnswerId(2)
@@ -103,4 +104,21 @@ private func rpcBytes(_ configure: (Message.Builder) throws -> Void) throws -> [
     }
     try RPCWireValidator.validate(try RPCWireValidator.decode(late), state: &state)
     #expect(state.cancelledOutboundQuestions.isEmpty)
+}
+
+@Test func validatorAcceptsOneResolveAfterAnUnresolvedPromiseWasReleased() throws {
+    var state = RPCWireValidationState()
+    state.releasedPromiseImports = [12]
+    let bytes = try rpcBytes { root in
+        let resolve = try root.initResolve()
+        try resolve.setPromiseId(12)
+        let exception = try resolve.initException()
+        try exception.setReason("resolved after release")
+    }
+    let message = try RPCWireValidator.decode(bytes)
+    try RPCWireValidator.validate(message, state: &state)
+    #expect(state.releasedPromiseImports.isEmpty)
+    #expect(throws: RPCProtocolError.unknownCapability(12)) {
+        try RPCWireValidator.validate(message, state: &state)
+    }
 }

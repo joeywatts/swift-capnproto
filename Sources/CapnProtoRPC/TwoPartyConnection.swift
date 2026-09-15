@@ -54,6 +54,34 @@ private final class PendingWireQuestion: @unchecked Sendable {
     }
 }
 
+private final class PendingTailResult: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuations: [CheckedContinuation<CapabilityCallResult, any Error>] = []
+    private var result: Result<CapabilityCallResult, any Error>?
+
+    func wait() async throws -> CapabilityCallResult {
+        try await withCheckedThrowingContinuation { continuation in
+            let completed: Result<CapabilityCallResult, any Error>? = lock.withLock {
+                if let result { return result }
+                continuations.append(continuation)
+                return nil
+            }
+            if let completed { continuation.resume(with: completed) }
+        }
+    }
+
+    func resume(with completed: Result<CapabilityCallResult, any Error>) {
+        let waiters: [CheckedContinuation<CapabilityCallResult, any Error>] = lock.withLock {
+            guard result == nil else { return [] }
+            result = completed
+            let waiters = continuations
+            continuations.removeAll(keepingCapacity: false)
+            return waiters
+        }
+        for waiter in waiters { waiter.resume(with: completed) }
+    }
+}
+
 private final class RemoteCapabilityTarget: CapabilityCallTargetWithCaps, @unchecked Sendable {
     let importID: UInt32
     weak var connection: TwoPartyRPCConnection?
@@ -87,7 +115,9 @@ private final class RemoteCapabilityTarget: CapabilityCallTargetWithCaps, @unche
     }
 }
 
-private final class PromisedAnswerCapabilityTarget: CapabilityCallTarget, @unchecked Sendable {
+private final class PromisedAnswerCapabilityTarget: CapabilityCallTargetWithCaps,
+    @unchecked Sendable
+{
     let questionID: UInt32
     let pointerFields: [UInt16]
     weak var connection: TwoPartyRPCConnection?
@@ -104,7 +134,88 @@ private final class PromisedAnswerCapabilityTarget: CapabilityCallTarget, @unche
         guard let connection else { throw RPCConnectionError.disconnected }
         return try await connection.callPromised(
             questionID: questionID, pointerFields: pointerFields,
+            method: method, params: params
+        ).results
+    }
+
+    func call(
+        _ method: CapabilityMethodDescriptor, params: StructReader,
+        capabilities: [CapabilityClient]
+    ) async throws -> CapabilityCallResult {
+        guard let connection else { throw RPCConnectionError.disconnected }
+        return try await connection.callPromised(
+            questionID: questionID, pointerFields: pointerFields,
+            method: method, params: params, capabilities: capabilities)
+    }
+}
+
+private final class ReceiverAnswerCapabilityTarget: CapabilityCallTargetWithCaps,
+    @unchecked Sendable
+{
+    let questionID: UInt32
+    let pointerFields: [UInt16]
+    weak var connection: TwoPartyRPCConnection?
+
+    init(questionID: UInt32, pointerFields: [UInt16], connection: TwoPartyRPCConnection) {
+        self.questionID = questionID
+        self.pointerFields = pointerFields
+        self.connection = connection
+    }
+
+    func call(_ method: CapabilityMethodDescriptor, params: StructReader) async throws
+        -> StructReader
+    {
+        guard let connection else { throw RPCConnectionError.disconnected }
+        return try await connection.callReceiverAnswer(
+            questionID: questionID, pointerFields: pointerFields,
             method: method, params: params)
+    }
+
+    func call(
+        _ method: CapabilityMethodDescriptor, params: StructReader,
+        capabilities: [CapabilityClient]
+    ) async throws -> CapabilityCallResult {
+        guard let connection else { throw RPCConnectionError.disconnected }
+        return try await connection.callReceiverAnswer(
+            questionID: questionID, pointerFields: pointerFields,
+            method: method, params: params, capabilities: capabilities)
+    }
+}
+
+private final class ImportedPromiseCapabilityTarget: CapabilityCallTargetWithCaps,
+    @unchecked Sendable
+{
+    let importID: UInt32
+    let promised: CapabilityClient
+    weak var connection: TwoPartyRPCConnection?
+
+    init(importID: UInt32, promised: CapabilityClient, connection: TwoPartyRPCConnection) {
+        self.importID = importID
+        self.promised = promised
+        self.connection = connection
+    }
+
+    func supports(interfaceID: UInt64) -> Bool {
+        promised.target.supports(interfaceID: interfaceID)
+    }
+
+    func call(_ method: CapabilityMethodDescriptor, params: StructReader) async throws
+        -> StructReader
+    {
+        try await promised.call(method, params: params)
+    }
+
+    func call(
+        _ method: CapabilityMethodDescriptor, params: StructReader,
+        capabilities: [CapabilityClient]
+    ) async throws -> CapabilityCallResult {
+        try await promised.call(method, params: params, capabilities: capabilities)
+    }
+
+    deinit {
+        guard let connection else { return }
+        let id = importID
+        Task { await connection.releaseAllImports(id) }
     }
 }
 
@@ -167,18 +278,28 @@ public actor TwoPartyRPCConnection {
     private var nextEmbargoID: UInt32 = 0
     private var pending: [UInt32: PendingWireQuestion] = [:]
     private var returnedMessages: [UInt32: [UInt8]] = [:]
+    private var questionParamExportIDs: [UInt32: [UInt32]] = [:]
+    private var inboundTailResults: [UInt32: PendingTailResult] = [:]
+    private var tailAdoptions: [UInt32: PendingTailResult] = [:]
+    private var tailAnswerQuestions: [UInt32: UInt32] = [:]
     private var cancelledQuestionIDs: Set<UInt32> = []
     private var embargoWaiters: [UInt32: PendingWireQuestion] = [:]
-    private var answers: [UInt32: Task<Void, Never>] = [:]
+    private var answers: [UInt32: Task<Void, any Error>] = [:]
     private var exports: [UInt32: CapabilityClient] = [:]
+    private var exportIDsByTarget: [ObjectIdentifier: UInt32] = [:]
+    private var exportReferences: [UInt32: Int] = [:]
     private var importReferences: [UInt32: Int] = [:]
     private var promiseResolvers: [UInt32: CapabilityResolver] = [:]
     private var promiseClients: [UInt32: CapabilityClient] = [:]
+    private var promiseRedirects: [UInt32: UInt32] = [:]
     private var answerCapabilities: [UInt32: CapabilityClient] = [:]
     private var answerResults: [UInt32: CapabilityCallResult] = [:]
+    private var answerResultWaiters: [UInt32: PendingTailResult] = [:]
+    private var answerExportIDs: [UInt32: [UInt32]] = [:]
     private var answerDependents: [UInt32: Int] = [:]
     private var finishedAnswers: Set<UInt32> = []
-    private var streamingTail: Task<Void, Never>?
+    private var streamingTail: Task<Void, any Error>?
+    private var streamingGeneration: UInt64 = 0
     private var closed = false
     private var terminalError: String?
 
@@ -260,6 +381,55 @@ public actor TwoPartyRPCConnection {
             capabilities: capabilities)
     }
 
+    /// Starts the reverse-direction call used by a server tail call. The server
+    /// should throw `RPCTailCall(questionID:)` with the returned ID.
+    public func beginTailCall(
+        importID: UInt32, method: CapabilityMethodDescriptor, params: StructReader,
+        capabilities: [CapabilityClient] = []
+    ) async throws -> UInt32 {
+        guard importReferences[importID] != nil else {
+            throw RPCProtocolError.unknownCapability(importID)
+        }
+        let id = try allocateQuestion()
+        let waiter = PendingWireQuestion()
+        pending[id] = waiter
+        validation.outboundQuestions.insert(id)
+        validation.outboundTailQuestions.insert(id)
+        var callSent = false
+        do {
+            try await sendMessage { root in
+                let call = try root.initCall()
+                try call.setQuestionId(id)
+                try call.initTarget().setImportedCap(importID)
+                try call.setInterfaceId(method.interfaceID)
+                try call.setMethodId(method.methodID)
+                try call.sendResultsTo.setYourself()
+                let payload = try call.initParams()
+                try payload.content.setStruct(params)
+                if !capabilities.isEmpty {
+                    let table = try payload.initCapTable(count: capabilities.count)
+                    var exported: [UInt32] = []
+                    for (index, capability) in capabilities.enumerated() {
+                        if let exportID = try encodeCapability(
+                            capability, into: CapDescriptor.Builder(table[index]))
+                        {
+                            exported.append(exportID)
+                        }
+                    }
+                    questionParamExportIDs[id] = exported
+                }
+            }
+            callSent = true
+            return id
+        } catch {
+            pending.removeValue(forKey: id)
+            validation.outboundQuestions.remove(id)
+            validation.outboundTailQuestions.remove(id)
+            if !callSent { try rollbackQuestionParamExports(id) }
+            throw error
+        }
+    }
+
     /// Returns a capability that addresses a capability in an unanswered call.
     /// Calls issued through it are transmitted immediately as promised-answer targets.
     public func pipeline(
@@ -287,7 +457,7 @@ public actor TwoPartyRPCConnection {
             try await sendMessage { root in
                 let message = try root.initDisembargo()
                 try message.initTarget().setImportedCap(importID)
-                try message.context.setReceiverLoopback(id)
+                try message.context.setSenderLoopback(id)
             }
             _ = try await waiter.wait()
         } catch {
@@ -299,15 +469,40 @@ public actor TwoPartyRPCConnection {
 
     fileprivate func callPromised(
         questionID: UInt32, pointerFields: [UInt16],
-        method: CapabilityMethodDescriptor, params: StructReader
-    ) async throws -> StructReader {
+        method: CapabilityMethodDescriptor, params: StructReader,
+        capabilities: [CapabilityClient] = []
+    ) async throws -> CapabilityCallResult {
         guard validation.outboundQuestions.contains(questionID) else {
             throw RPCProtocolError.unknownQuestion(questionID)
         }
         return try await performCall(
             target: .promised(questionID: questionID, pointerFields: pointerFields),
-            method: method, params: params, capabilities: []
-        ).results
+            method: method, params: params, capabilities: capabilities)
+    }
+
+    fileprivate func callReceiverAnswer(
+        questionID: UInt32, pointerFields: [UInt16],
+        method: CapabilityMethodDescriptor, params: StructReader
+    ) async throws -> StructReader {
+        guard validation.inboundQuestions.contains(questionID) else {
+            throw RPCProtocolError.unknownAnswer(questionID)
+        }
+        let target = try await resolveReceiverAnswer(
+            questionID: questionID, pointerFields: pointerFields)
+        return try await target.call(method, params: params)
+    }
+
+    fileprivate func callReceiverAnswer(
+        questionID: UInt32, pointerFields: [UInt16],
+        method: CapabilityMethodDescriptor, params: StructReader,
+        capabilities: [CapabilityClient]
+    ) async throws -> CapabilityCallResult {
+        guard validation.inboundQuestions.contains(questionID) else {
+            throw RPCProtocolError.unknownAnswer(questionID)
+        }
+        let target = try await resolveReceiverAnswer(
+            questionID: questionID, pointerFields: pointerFields)
+        return try await target.call(method, params: params, capabilities: capabilities)
     }
 
     private func performCall(
@@ -318,6 +513,8 @@ public actor TwoPartyRPCConnection {
         let waiter = PendingWireQuestion()
         pending[id] = waiter
         validation.outboundQuestions.insert(id)
+        var receivedReturn = false
+        var callSent = false
         do {
             try await sendMessage { root in
                 let call = try root.initCall()
@@ -343,17 +540,24 @@ public actor TwoPartyRPCConnection {
                 try payload.content.setStruct(params)
                 if !capabilities.isEmpty {
                     let table = try payload.initCapTable(count: capabilities.count)
+                    var exported: [UInt32] = []
                     for (index, capability) in capabilities.enumerated() {
-                        try encodeCapability(capability, into: CapDescriptor.Builder(table[index]))
+                        if let exportID = try encodeCapability(
+                            capability, into: CapDescriptor.Builder(table[index]))
+                        {
+                            exported.append(exportID)
+                        }
                     }
+                    questionParamExportIDs[id] = exported
                 }
             }
+            callSent = true
             let bytes = try await withTaskCancellationHandler {
                 try await waiter.wait()
             } onCancel: {
                 Task { await self.cancelQuestion(id) }
             }
-            defer { Task { await self.finishQuestion(id, releaseCaps: true) } }
+            receivedReturn = true
             let wire = try RPCWireValidator.decode(bytes, maximumWords: maximumMessageWords)
             guard case .return(let result) = try wire.which else {
                 throw RPCProtocolError.malformedMessage("expected return")
@@ -361,28 +565,26 @@ public actor TwoPartyRPCConnection {
             switch try result.which {
             case .results(let payload):
                 let capabilities = try payload.capTable.map { try importCapability($0) }
+                Task { await self.finishQuestion(id, releaseCaps: capabilities.isEmpty) }
                 return CapabilityCallResult(
                     results: try payload.content.asStruct(), capabilities: capabilities)
             case .exception(let exception):
                 throw CapabilityError.broken(try remoteException(exception))
-            case .canceled: throw CapabilityError.cancelled
+            case .canceled:
+                throw CapabilityError.cancelled
             case .takeFromOtherQuestion(let other):
-                let otherBytes: [UInt8]
-                if let completed = returnedMessages[other] {
-                    otherBytes = completed
-                } else if let otherWaiter = pending[other] {
-                    otherBytes = try await otherWaiter.wait()
-                } else {
+                guard let tailResult = inboundTailResults[other] else {
                     throw RPCProtocolError.unknownQuestion(other)
                 }
-                let otherMessage = try RPCWireValidator.decode(
-                    otherBytes, maximumWords: maximumMessageWords)
-                guard case .return(let otherReturn) = try otherMessage.which,
-                    case .results(let payload) = try otherReturn.which
-                else { throw RPCProtocolError.malformedMessage("invalid tail return") }
-                return CapabilityCallResult(
-                    results: try payload.content.asStruct(),
-                    capabilities: try payload.capTable.map { try importCapability($0) })
+                tailAdoptions[id] = tailResult
+                let adopted = try await withTaskCancellationHandler {
+                    try await tailResult.wait()
+                } onCancel: {
+                    Task { await self.cancelQuestion(id) }
+                }
+                tailAdoptions.removeValue(forKey: id)
+                Task { await self.finishQuestion(id, releaseCaps: adopted.capabilities.isEmpty) }
+                return adopted
             case .resultsSentElsewhere:
                 throw RPCProtocolError.malformedMessage("results sent elsewhere")
             case .acceptFromThirdParty:
@@ -392,6 +594,8 @@ public actor TwoPartyRPCConnection {
         } catch {
             pending.removeValue(forKey: id)
             validation.outboundQuestions.remove(id)
+            if !callSent { try rollbackQuestionParamExports(id) }
+            if receivedReturn { await finishQuestion(id, releaseCaps: true) }
             throw error
         }
     }
@@ -404,17 +608,28 @@ public actor TwoPartyRPCConnection {
         let waiters = Array(pending.values)
         pending.removeAll()
         returnedMessages.removeAll()
+        questionParamExportIDs.removeAll()
+        inboundTailResults.removeAll()
+        let adoptions = Array(tailAdoptions.values)
+        tailAdoptions.removeAll()
+        tailAnswerQuestions.removeAll()
         cancelledQuestionIDs.removeAll()
         let barriers = Array(embargoWaiters.values)
         embargoWaiters.removeAll()
         let work = Array(answers.values)
         answers.removeAll()
         exports.removeAll()
+        exportIDsByTarget.removeAll()
+        exportReferences.removeAll()
         importReferences.removeAll()
         promiseResolvers.removeAll()
         promiseClients.removeAll()
+        promiseRedirects.removeAll()
         answerCapabilities.removeAll()
         answerResults.removeAll()
+        let answerWaiters = Array(answerResultWaiters.values)
+        answerResultWaiters.removeAll()
+        answerExportIDs.removeAll()
         answerDependents.removeAll()
         finishedAnswers.removeAll()
         validation = RPCWireValidationState()
@@ -422,6 +637,12 @@ public actor TwoPartyRPCConnection {
         streamingTail = nil
         for task in work { task.cancel() }
         for waiter in waiters { waiter.resume(throwing: RPCConnectionError.disconnected) }
+        for adoption in adoptions {
+            adoption.resume(with: .failure(RPCConnectionError.disconnected))
+        }
+        for waiter in answerWaiters {
+            waiter.resume(with: .failure(RPCConnectionError.disconnected))
+        }
         for barrier in barriers { barrier.resume(throwing: RPCConnectionError.disconnected) }
         await transport.close()
     }
@@ -477,18 +698,51 @@ public actor TwoPartyRPCConnection {
             }
         case .call(let call):
             let id = try call.questionId
+            answerResultWaiters[id] = PendingTailResult()
             let wireTarget = try decodeTarget(try call.target)
-            let method = CapabilityMethodDescriptor(
-                interfaceID: try call.interfaceId, methodID: try call.methodId,
+            let interfaceID = try call.interfaceId
+            let methodID = try call.methodId
+            var method = CapabilityMethodDescriptor(
+                interfaceID: interfaceID, methodID: methodID,
                 name: "wire", paramStructID: 0, resultStructID: 0,
                 isStreaming: false)
+            if case .imported(let importID) = wireTarget,
+                let lookup = exports[importID]?.target as? any CapabilityMethodLookupTarget,
+                let known = lookup.methodDescriptor(interfaceID: interfaceID, methodID: methodID)
+            {
+                method = known
+            }
             let wirePayload = try call.params
             let params = try wirePayload.content.asStruct()
             let parameterCapabilities = try wirePayload.capTable.map { try importCapability($0) }
-            let preceding = streamingTail
-            let task = Task { [weak self] in
-                await preceding?.value
+            let resultsToSelf: Bool
+            switch try call.sendResultsTo.which {
+            case .caller: resultsToSelf = false
+            case .yourself:
+                resultsToSelf = true
+                inboundTailResults[id] = PendingTailResult()
+            case .thirdParty:
+                throw RPCProtocolError.unsupportedMessageVariant("third-party results")
+            case .unknown(let tag): throw RPCProtocolError.unknownMessageVariant(tag)
+            }
+            let isPromisedTarget: Bool
+            if case .promised = wireTarget {
+                isPromisedTarget = true
+            } else {
+                isPromisedTarget = false
+            }
+            let joinsStreamingChain = method.isStreaming || streamingTail != nil || isPromisedTarget
+            let preceding = joinsStreamingChain ? streamingTail : nil
+            let generation: UInt64?
+            if joinsStreamingChain {
+                streamingGeneration &+= 1
+                generation = streamingGeneration
+            } else {
+                generation = nil
+            }
+            let task = Task<Void, any Error> { [weak self] in
                 do {
+                    try await preceding?.value
                     guard let self else { throw RPCConnectionError.disconnected }
                     let target = try await self.resolveTarget(wireTarget)
                     let result: CapabilityCallResult
@@ -503,18 +757,50 @@ public actor TwoPartyRPCConnection {
                             results: try await target.call(method, params: params))
                     }
                     await self.recordAnswerResult(result, for: id)
-                    try await self.sendResults(answerID: id, value: result)
+                    if resultsToSelf {
+                        await self.completeInboundTail(id, with: .success(result))
+                        try await self.sendResultsSentElsewhere(
+                            answerID: id, releaseParamCaps: parameterCapabilities.isEmpty)
+                    } else {
+                        try await self.sendResults(
+                            answerID: id, value: result,
+                            releaseParamCaps: parameterCapabilities.isEmpty)
+                    }
                 } catch let tail as RPCTailCall {
-                    try? await self?.sendTailReturn(answerID: id, from: tail.questionID)
+                    await self?.recordTailQuestion(tail.questionID, for: id)
+                    await self?.failAnswerResult(
+                        CapabilityError.unserializableCapability, for: id)
+                    try? await self?.sendTailReturn(
+                        answerID: id, from: tail.questionID,
+                        releaseParamCaps: parameterCapabilities.isEmpty)
                 } catch {
-                    try? await self?.sendException(answerID: id, error: error)
+                    await self?.failAnswerResult(error, for: id)
+                    if resultsToSelf {
+                        await self?.completeInboundTail(id, with: .failure(error))
+                        try? await self?.sendResultsSentElsewhere(
+                            answerID: id, releaseParamCaps: parameterCapabilities.isEmpty)
+                    } else {
+                        try? await self?.sendException(
+                            answerID: id, error: error,
+                            releaseParamCaps: parameterCapabilities.isEmpty)
+                    }
+                    await self?.answerFinished(id)
+                    if let generation { await self?.completeStreamingGeneration(generation) }
+                    throw error
                 }
                 await self?.answerFinished(id)
+                if let generation { await self?.completeStreamingGeneration(generation) }
             }
             answers[id] = task
-            streamingTail = task
+            if joinsStreamingChain { streamingTail = task }
         case .return(let result):
             let id = try result.answerId
+            let exportedParams = questionParamExportIDs.removeValue(forKey: id) ?? []
+            if try result.releaseParamCaps {
+                for (exportID, count) in Dictionary(grouping: exportedParams, by: { $0 }) {
+                    try releaseExport(exportID, count: count.count)
+                }
+            }
             guard let waiter = pending.removeValue(forKey: id) else {
                 if cancelledQuestionIDs.remove(id) != nil { return }
                 throw RPCProtocolError.unknownQuestion(id)
@@ -524,6 +810,18 @@ public actor TwoPartyRPCConnection {
         case .finish(let finish):
             let id = try finish.questionId
             answers.removeValue(forKey: id)?.cancel()
+            inboundTailResults.removeValue(forKey: id)
+            answerResultWaiters.removeValue(forKey: id)?.resume(
+                with: .failure(CapabilityError.cancelled))
+            if let tailQuestion = tailAnswerQuestions.removeValue(forKey: id) {
+                await finishQuestion(tailQuestion, releaseCaps: true)
+            }
+            let exported = answerExportIDs.removeValue(forKey: id) ?? []
+            if try finish.releaseResultCaps {
+                for (exportID, count) in Dictionary(grouping: exported, by: { $0 }) {
+                    try releaseExport(exportID, count: count.count)
+                }
+            }
             if answerDependents[id, default: 0] == 0 {
                 answerCapabilities.removeValue(forKey: id)
                 answerResults.removeValue(forKey: id)
@@ -553,36 +851,65 @@ public actor TwoPartyRPCConnection {
     }
 
     private func export(_ client: CapabilityClient) throws -> UInt32 {
+        try exportEntry(client).id
+    }
+
+    private func exportEntry(_ client: CapabilityClient) throws -> (id: UInt32, isNew: Bool) {
+        let identity = ObjectIdentifier(client.target)
+        if let id = exportIDsByTarget[identity] {
+            exportReferences[id, default: 0] += 1
+            return (id, false)
+        }
         guard nextExportID != UInt32.max else { throw RPCConnectionError.idExhausted }
         let id = nextExportID
         nextExportID += 1
         exports[id] = client
+        exportIDsByTarget[identity] = id
+        exportReferences[id] = 1
         validation.exports.insert(id)
-        return id
+        return (id, true)
     }
 
+    @discardableResult
     private func encodeCapability(
         _ client: CapabilityClient, into descriptor: CapDescriptor.Builder
-    ) throws {
+    ) throws -> UInt32? {
+        if let promised = client.target as? PromisedAnswerCapabilityTarget,
+            promised.connection === self
+        {
+            let answer = try descriptor.initReceiverAnswer()
+            try answer.setQuestionId(promised.questionID)
+            if !promised.pointerFields.isEmpty {
+                let transform = try answer.initTransform(count: promised.pointerFields.count)
+                for (index, field) in promised.pointerFields.enumerated() {
+                    try PromisedAnswer.Op.Builder(transform[index]).setGetPointerField(field)
+                }
+            }
+            return nil
+        }
         if let remote = client.target as? RemoteCapabilityTarget, remote.connection === self {
             try descriptor.setReceiverHosted(remote.importID)
-            return
+            return nil
         }
         if let promise = client.target as? PromiseCapabilityTarget {
             if let resolution = promise.currentResolution {
                 if case .capability(let resolved) = resolution {
-                    try encodeCapability(resolved, into: descriptor)
-                    return
+                    return try encodeCapability(resolved, into: descriptor)
                 }
             }
-            let id = try export(client)
+            let entry = try exportEntry(client)
+            let id = entry.id
             try descriptor.setSenderPromise(id)
-            promise.observeResolution { [weak self] resolution in
-                Task { await self?.sendPromiseResolution(id: id, resolution: resolution) }
+            if entry.isNew {
+                promise.observeResolution { [weak self] resolution in
+                    Task { await self?.sendPromiseResolution(id: id, resolution: resolution) }
+                }
             }
-            return
+            return id
         }
-        try descriptor.setSenderHosted(export(client))
+        let id = try export(client)
+        try descriptor.setSenderHosted(id)
+        return id
     }
 
     private func sendPromiseResolution(id: UInt32, resolution: PromiseResolution) async {
@@ -606,10 +933,26 @@ public actor TwoPartyRPCConnection {
     }
 
     private func releaseExport(_ id: UInt32, count: Int) throws {
-        guard count > 0, exports.removeValue(forKey: id) != nil else {
+        guard count > 0, let references = exportReferences[id], references >= count,
+            let client = exports[id]
+        else {
             throw RPCProtocolError.unknownCapability(id)
         }
-        validation.exports.remove(id)
+        if references == count {
+            exports.removeValue(forKey: id)
+            exportReferences.removeValue(forKey: id)
+            exportIDsByTarget.removeValue(forKey: ObjectIdentifier(client.target))
+            validation.exports.remove(id)
+        } else {
+            exportReferences[id] = references - count
+        }
+    }
+
+    private func rollbackQuestionParamExports(_ questionID: UInt32) throws {
+        let exported = questionParamExportIDs.removeValue(forKey: questionID) ?? []
+        for (exportID, count) in Dictionary(grouping: exported, by: { $0 }) {
+            try releaseExport(exportID, count: count.count)
+        }
     }
 
     private func decodeTarget(_ target: MessageTarget.Reader) throws -> InboundWireTarget {
@@ -708,14 +1051,24 @@ public actor TwoPartyRPCConnection {
             }
             let promise = CapabilityClient.makePromise()
             promiseResolvers[id] = promise.resolver
-            promiseClients[id] = promise.client
+            let client = CapabilityClient(
+                target: ImportedPromiseCapabilityTarget(
+                    importID: id, promised: promise.client, connection: self),
+                tableIndex: id)
+            promiseClients[id] = client
             importReferences[id] = 1
             validation.imports.insert(id)
-            return promise.client
+            validation.unresolvedPromiseImports.insert(id)
+            return client
         case .receiverHosted(let id):
             guard let client = exports[id] else { throw RPCProtocolError.unknownCapability(id) }
             return client
-        case .receiverAnswer, .thirdPartyHosted:
+        case .receiverAnswer(let answer):
+            let id = try answer.questionId
+            return CapabilityClient(
+                target: ReceiverAnswerCapabilityTarget(
+                    questionID: id, pointerFields: try decodeTransform(answer), connection: self))
+        case .thirdPartyHosted:
             throw RPCProtocolError.unsupportedThirdPartyCapability
         case .unknown(let tag): throw RPCProtocolError.unknownMessageVariant(tag)
         }
@@ -736,25 +1089,37 @@ public actor TwoPartyRPCConnection {
         }
     }
 
-    private func sendResults(answerID: UInt32, value: CapabilityCallResult) async throws {
+    private func sendResults(
+        answerID: UInt32, value: CapabilityCallResult, releaseParamCaps: Bool
+    ) async throws {
         try await sendMessage { root in
             let result = try root.initReturn()
             try result.setAnswerId(answerID)
+            try result.setReleaseParamCaps(releaseParamCaps)
             let payload = try result.initResults()
             try payload.content.setStruct(value.results)
             if !value.capabilities.isEmpty {
                 let table = try payload.initCapTable(count: value.capabilities.count)
+                var exported: [UInt32] = []
                 for (index, capability) in value.capabilities.enumerated() {
-                    try encodeCapability(capability, into: CapDescriptor.Builder(table[index]))
+                    if let id = try encodeCapability(
+                        capability, into: CapDescriptor.Builder(table[index]))
+                    {
+                        exported.append(id)
+                    }
                 }
+                answerExportIDs[answerID] = exported
             }
         }
     }
 
-    private func sendException(answerID: UInt32, error: any Error) async throws {
+    private func sendException(
+        answerID: UInt32, error: any Error, releaseParamCaps: Bool = true
+    ) async throws {
         try await sendMessage { root in
             let result = try root.initReturn()
             try result.setAnswerId(answerID)
+            try result.setReleaseParamCaps(releaseParamCaps)
             let exception = try result.initException()
             let remote = Self.wireException(error)
             try exception.setReason(remote.reason)
@@ -762,16 +1127,31 @@ public actor TwoPartyRPCConnection {
         }
     }
 
-    private func sendTailReturn(answerID: UInt32, from otherQuestionID: UInt32) async throws {
+    private func sendTailReturn(
+        answerID: UInt32, from otherQuestionID: UInt32, releaseParamCaps: Bool
+    ) async throws {
         try await sendMessage { root in
             let result = try root.initReturn()
             try result.setAnswerId(answerID)
+            try result.setReleaseParamCaps(releaseParamCaps)
             try result.setTakeFromOtherQuestion(otherQuestionID)
+        }
+    }
+
+    private func sendResultsSentElsewhere(
+        answerID: UInt32, releaseParamCaps: Bool
+    ) async throws {
+        try await sendMessage { root in
+            let result = try root.initReturn()
+            try result.setAnswerId(answerID)
+            try result.setReleaseParamCaps(releaseParamCaps)
+            try result.setResultsSentElsewhere()
         }
     }
 
     private func finishQuestion(_ id: UInt32, releaseCaps: Bool) async {
         validation.outboundQuestions.remove(id)
+        validation.outboundTailQuestions.remove(id)
         validation.returnedQuestions.remove(id)
         returnedMessages.removeValue(forKey: id)
         guard !closed else { return }
@@ -784,6 +1164,7 @@ public actor TwoPartyRPCConnection {
 
     private func cancelQuestion(_ id: UInt32) async {
         pending.removeValue(forKey: id)?.resume(throwing: CapabilityError.cancelled)
+        tailAdoptions.removeValue(forKey: id)?.resume(with: .failure(CapabilityError.cancelled))
         cancelledQuestionIDs.insert(id)
         validation.cancelledOutboundQuestions.insert(id)
         await finishQuestion(id, releaseCaps: true)
@@ -791,8 +1172,70 @@ public actor TwoPartyRPCConnection {
 
     private func answerFinished(_ id: UInt32) { answers.removeValue(forKey: id) }
 
+    private func completeStreamingGeneration(_ generation: UInt64) {
+        if streamingGeneration == generation { streamingTail = nil }
+    }
+
     private func recordAnswerResult(_ result: CapabilityCallResult, for id: UInt32) {
         answerResults[id] = result
+        answerResultWaiters[id]?.resume(with: .success(result))
+    }
+
+    private func failAnswerResult(_ error: any Error, for id: UInt32) {
+        answerResultWaiters[id]?.resume(with: .failure(error))
+    }
+
+    private func resolveReceiverAnswer(
+        questionID: UInt32, pointerFields: [UInt16]
+    ) async throws -> CapabilityClient {
+        if pointerFields.isEmpty, let capability = answerCapabilities[questionID] {
+            return capability
+        }
+        let result: CapabilityCallResult
+        if let completed = answerResults[questionID] {
+            result = completed
+        } else {
+            guard let waiter = answerResultWaiters[questionID] else {
+                throw RPCProtocolError.unknownAnswer(questionID)
+            }
+            result = try await waiter.wait()
+        }
+        guard !pointerFields.isEmpty else { throw RPCProtocolError.invalidTransform }
+        var current = result.results
+        for (index, field) in pointerFields.enumerated() {
+            let pointer = try current.anyPointerField(at: Int(field))
+            if index == pointerFields.count - 1 {
+                let tableIndex = Int(try pointer.capabilityTableIndex)
+                guard result.capabilities.indices.contains(tableIndex) else {
+                    throw RPCProtocolError.unknownCapability(UInt32(tableIndex))
+                }
+                return result.capabilities[tableIndex]
+            }
+            current = try pointer.asStruct()
+        }
+        throw RPCProtocolError.invalidTransform
+    }
+
+    private func decodeTransform(_ answer: PromisedAnswer.Reader) throws -> [UInt16] {
+        var fields: [UInt16] = []
+        for operation in try answer.transform {
+            switch try operation.which {
+            case .noop: break
+            case .getPointerField(let field): fields.append(field)
+            case .unknown: throw RPCProtocolError.invalidTransform
+            }
+        }
+        return fields
+    }
+
+    private func completeInboundTail(
+        _ id: UInt32, with result: Result<CapabilityCallResult, any Error>
+    ) {
+        inboundTailResults[id]?.resume(with: result)
+    }
+
+    private func recordTailQuestion(_ questionID: UInt32, for answerID: UInt32) {
+        tailAnswerQuestions[answerID] = questionID
     }
 
     private func handleResolve(_ resolve: Resolve.Reader) throws {
@@ -801,18 +1244,42 @@ public actor TwoPartyRPCConnection {
             throw RPCProtocolError.unknownCapability(id)
         }
         switch try resolve.which {
-        case .cap(let descriptor): try resolver.resolve(to: importCapability(descriptor))
+        case .cap(let descriptor):
+            if case .senderPromise(let targetID) = try descriptor.which {
+                guard targetID != id, !promiseRedirectChain(from: targetID, reaches: id) else {
+                    throw RPCProtocolError.promiseResolutionLoop
+                }
+                promiseRedirects[id] = targetID
+            }
+            try resolver.resolve(to: importCapability(descriptor))
         case .exception(let exception): try resolver.reject(try remoteException(exception))
         case .unknown(let tag): throw RPCProtocolError.unknownMessageVariant(tag)
         }
         validation.imports.remove(id)
-        let references = importReferences.removeValue(forKey: id) ?? 1
+        validation.unresolvedPromiseImports.remove(id)
+        validation.releasedPromiseImports.remove(id)
         promiseClients.removeValue(forKey: id)
-        Task { await self.sendRelease(id: id, count: references) }
     }
 
-    private func sendRelease(id: UInt32, count: Int) async {
-        guard count > 0, !closed else { return }
+    private func promiseRedirectChain(from start: UInt32, reaches target: UInt32) -> Bool {
+        var current: UInt32? = start
+        var visited: Set<UInt32> = []
+        while let id = current, visited.insert(id).inserted {
+            if id == target { return true }
+            current = promiseRedirects[id]
+        }
+        return false
+    }
+
+    fileprivate func releaseAllImports(_ id: UInt32) async {
+        guard let count = importReferences.removeValue(forKey: id), count > 0, !closed else {
+            return
+        }
+        validation.imports.remove(id)
+        if validation.unresolvedPromiseImports.remove(id) != nil {
+            validation.releasedPromiseImports.insert(id)
+        }
+        promiseRedirects.removeValue(forKey: id)
         try? await sendMessage { root in
             let release = try root.initRelease()
             try release.setId(id)
@@ -822,14 +1289,18 @@ public actor TwoPartyRPCConnection {
 
     private func handleDisembargo(_ disembargo: Disembargo.Reader) async throws {
         switch try disembargo.context.which {
-        case .receiverLoopback(let id):
+        case .senderLoopback(let id):
+            let target = try resolveTarget(decodeTarget(try disembargo.target))
+            guard capabilityIsHostedByPeer(target) else {
+                throw RPCProtocolError.embargoMismatch(id)
+            }
             try await sendMessage { root in
                 let response = try root.initDisembargo()
                 try response.setTarget(disembargo.target)
-                try response.context.setSenderLoopback(id)
+                try response.context.setReceiverLoopback(id)
             }
             validation.receiverLoopbackEmbargoes.remove(id)
-        case .senderLoopback(let id):
+        case .receiverLoopback(let id):
             guard let waiter = embargoWaiters.removeValue(forKey: id) else {
                 throw RPCProtocolError.embargoMismatch(id)
             }
@@ -838,6 +1309,22 @@ public actor TwoPartyRPCConnection {
             throw RPCProtocolError.unsupportedMessageVariant("three-party embargo")
         case .unknown(let tag): throw RPCProtocolError.unknownMessageVariant(tag)
         }
+    }
+
+    private func capabilityIsHostedByPeer(
+        _ client: CapabilityClient, visited: Set<ObjectIdentifier> = []
+    ) -> Bool {
+        let identity = ObjectIdentifier(client.target)
+        guard !visited.contains(identity) else { return false }
+        if let remote = client.target as? RemoteCapabilityTarget {
+            return remote.connection === self
+        }
+        guard let promise = client.target as? PromiseCapabilityTarget,
+            case .capability(let resolved) = promise.currentResolution
+        else { return false }
+        var visited = visited
+        visited.insert(identity)
+        return capabilityIsHostedByPeer(resolved, visited: visited)
     }
 
     private func sendMessage(_ configure: (Message.Builder) throws -> Void) async throws {

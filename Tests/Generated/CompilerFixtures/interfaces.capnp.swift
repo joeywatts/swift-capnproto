@@ -41,8 +41,9 @@ public enum Base {
     public static func client(_ server: any Server) -> Client {
         Client(
             CapabilityClient(
-                target: LocalCapabilityTarget(interfaceIDs: Set([16445351315435886556])) {
-                    context in
+                target: LocalCapabilityTarget(
+                    interfaceIDs: Set([16445351315435886556]), methods: Methods.all
+                ) { context in
                     try await dispatch(server, context: context)
                 }))
     }
@@ -68,6 +69,7 @@ public enum Base {
             interfaceID: 16445351315435886556, methodID: 0, name: "ping",
             paramStructID: 14495340349605588580, resultStructID: 15764536925368797769,
             isStreaming: false)
+        public static let all: [CapabilityMethodDescriptor] = [ping]
     }
 
     public enum PingParams {
@@ -195,7 +197,8 @@ public enum Child {
         Client(
             CapabilityClient(
                 target: LocalCapabilityTarget(
-                    interfaceIDs: Set([16383580762931240131, 16445351315435886556])
+                    interfaceIDs: Set([16383580762931240131, 16445351315435886556]),
+                    methods: Methods.all + Base.Methods.all
                 ) { context in
                     try await dispatch(server, context: context)
                 }))
@@ -233,6 +236,7 @@ public enum Child {
             interfaceID: 16383580762931240131, methodID: 1, name: "streamIt",
             paramStructID: 10619103378860634616, resultStructID: 11051721556433613166,
             isStreaming: true)
+        public static let all: [CapabilityMethodDescriptor] = [call, streamIt]
     }
 
     public enum CallParams {

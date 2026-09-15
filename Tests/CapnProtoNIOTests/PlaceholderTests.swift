@@ -77,6 +77,10 @@ private final class NetworkService: CapabilityCallTarget, @unchecked Sendable {
     var bytes: [UInt8] = []
     while bytes.count < 5 { bytes.append(contentsOf: try #require(try await server.receive())) }
     #expect(bytes == [1, 2, 3, 4, 5])
+    try await client.halfCloseOutput()
+    #expect(try await server.receive() == nil)
+    try await server.send([6, 7])
+    #expect(try await client.receive() == [6, 7])
     await client.close()
     await server.close()
     await listener.close()

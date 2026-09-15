@@ -249,9 +249,17 @@ public struct SwiftGenerator {
         lines.append("\(indent)    }")
         lines.append("")
         let allInterfaceIDs = [String(interfaceID)] + (try superclasses.map { String(try $0.id) })
+        let allMethodTables =
+            ["Methods.all"]
+            + (try superclasses.map {
+                guard let inheritedName = names[try $0.id] else {
+                    throw SwiftGeneratorError.missingNode(try $0.id)
+                }
+                return inheritedName + ".Methods.all"
+            })
         lines.append("\(indent)    public static func client(_ server: any Server) -> Client {")
         lines.append(
-            "\(indent)        Client(CapabilityClient(target: LocalCapabilityTarget(interfaceIDs: Set([\(allInterfaceIDs.joined(separator: ", "))])) { context in"
+            "\(indent)        Client(CapabilityClient(target: LocalCapabilityTarget(interfaceIDs: Set([\(allInterfaceIDs.joined(separator: ", "))]), methods: \(allMethodTables.joined(separator: " + "))) { context in"
         )
         lines.append("\(indent)            try await dispatch(server, context: context)")
         lines.append("\(indent)        }))")
@@ -311,6 +319,9 @@ public struct SwiftGenerator {
                 "\(indent)        public static let \(methodName) = CapabilityMethodDescriptor(interfaceID: \(interfaceID), methodID: \(methodID), name: \(String(reflecting: try method.name)), paramStructID: \(try method.paramStructType), resultStructID: \(try method.resultStructType), isStreaming: \(try method.isStreaming))"
             )
         }
+        lines.append(
+            "\(indent)        public static let all: [CapabilityMethodDescriptor] = [\(try methods.map { "\(swiftIdentifier(try $0.name))" }.joined(separator: ", "))]"
+        )
         lines.append("\(indent)    }")
         for child in try node.nestedNodes {
             lines.append("")
