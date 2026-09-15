@@ -3,6 +3,9 @@ set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 suite="$root/Tests/Conformance/capnp_test"
+# Build or reuse the exact pinned reference tool used by the fixture oracle.
+reference_prefix="${CAPNP_REFERENCE_PREFIX:-$("$root/Scripts/prepare-reference-capnp.sh")}"
+export PATH="$reference_prefix/bin:$PATH"
 swift build --product capnp-test-swift >/dev/null
 bin_path="$(swift build --show-bin-path)/capnp-test-swift"
 
@@ -28,7 +31,7 @@ make -s -C "$suite" expect/simpleTest.txt expect/simpleTest.bin
   fi
 )
 
-report="$(make -s -C "$suite" CAPNP_TEST_APP="$bin_path" 2>&1)"
+report="$(make -s -C "$suite" SHELL=/bin/bash CAPNP_TEST_APP="$bin_path" 2>&1)"
 skip_count="$(printf '%s\n' "$report" | grep -cE '^\.\. SKIP')"
 [[ "$skip_count" == 8 ]] || {
   printf '%s\n' "$report" >&2
