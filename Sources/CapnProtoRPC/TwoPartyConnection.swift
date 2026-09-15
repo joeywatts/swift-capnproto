@@ -134,6 +134,7 @@ public actor TwoPartyRPCConnection {
     private var nextExportID: UInt32 = 0
     private var nextEmbargoID: UInt32 = 0
     private var pending: [UInt32: PendingWireQuestion] = [:]
+    private var embargoWaiters: [UInt32: PendingWireQuestion] = [:]
     private var answers: [UInt32: Task<Void, Never>] = [:]
     private var exports: [UInt32: CapabilityClient] = [:]
     private var importReferences: [UInt32: Int] = [:]
@@ -217,6 +218,33 @@ public actor TwoPartyRPCConnection {
         CapabilityClient(
             target: PromisedAnswerCapabilityTarget(
                 questionID: questionID, pointerFields: pointerFields, connection: self))
+    }
+
+    /// Inserts the two-party sender/receiver loopback barrier defined by
+    /// `rpc.capnp`. Completion proves that all earlier calls to the import have
+    /// reached the peer before later calls are sent.
+    public func establishOrderingBarrier(for importID: UInt32) async throws {
+        guard importReferences[importID] != nil else {
+            throw RPCProtocolError.unknownCapability(importID)
+        }
+        guard nextEmbargoID != UInt32.max else { throw RPCConnectionError.idExhausted }
+        let id = nextEmbargoID
+        nextEmbargoID += 1
+        let waiter = PendingWireQuestion()
+        embargoWaiters[id] = waiter
+        validation.senderLoopbackEmbargoes.insert(id)
+        do {
+            try await sendMessage { root in
+                let message = try root.initDisembargo()
+                try message.initTarget().setImportedCap(importID)
+                try message.context.setReceiverLoopback(id)
+            }
+            _ = try await waiter.wait()
+        } catch {
+            embargoWaiters.removeValue(forKey: id)
+            validation.senderLoopbackEmbargoes.remove(id)
+            throw error
+        }
     }
 
     fileprivate func callPromised(
@@ -307,6 +335,8 @@ public actor TwoPartyRPCConnection {
         receiveTask = nil
         let waiters = Array(pending.values)
         pending.removeAll()
+        let barriers = Array(embargoWaiters.values)
+        embargoWaiters.removeAll()
         let work = Array(answers.values)
         answers.removeAll()
         exports.removeAll()
@@ -319,6 +349,7 @@ public actor TwoPartyRPCConnection {
         streamingTail = nil
         for task in work { task.cancel() }
         for waiter in waiters { waiter.resume(throwing: RPCConnectionError.disconnected) }
+        for barrier in barriers { barrier.resume(throwing: RPCConnectionError.disconnected) }
         await transport.close()
     }
 
@@ -492,7 +523,8 @@ public actor TwoPartyRPCConnection {
         case .senderHosted(let id):
             importReferences[id, default: 0] += 1
             validation.imports.insert(id)
-            return CapabilityClient(target: RemoteCapabilityTarget(importID: id, connection: self))
+            return CapabilityClient(
+                target: RemoteCapabilityTarget(importID: id, connection: self), tableIndex: id)
         case .senderPromise(let id):
             if let client = promiseClients[id] {
                 importReferences[id, default: 0] += 1
@@ -582,12 +614,22 @@ public actor TwoPartyRPCConnection {
     }
 
     private func handleDisembargo(_ disembargo: Disembargo.Reader) async throws {
-        if case .receiverLoopback(let id) = try disembargo.context.which {
+        switch try disembargo.context.which {
+        case .receiverLoopback(let id):
             try await sendMessage { root in
                 let response = try root.initDisembargo()
                 try response.setTarget(disembargo.target)
                 try response.context.setSenderLoopback(id)
             }
+            validation.receiverLoopbackEmbargoes.remove(id)
+        case .senderLoopback(let id):
+            guard let waiter = embargoWaiters.removeValue(forKey: id) else {
+                throw RPCProtocolError.embargoMismatch(id)
+            }
+            waiter.resume(returning: [])
+        case .accept, .provide:
+            throw RPCProtocolError.unsupportedMessageVariant("three-party embargo")
+        case .unknown(let tag): throw RPCProtocolError.unknownMessageVariant(tag)
         }
     }
 

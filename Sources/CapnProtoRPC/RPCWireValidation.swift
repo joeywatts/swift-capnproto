@@ -115,13 +115,13 @@ public enum RPCWireValidator {
             case .unknown(let tag): throw RPCProtocolError.unknownMessageVariant(tag)
             }
         case .disembargo(let disembargo):
-            try validateTarget(try disembargo.target, state: next)
             switch try disembargo.context.which {
             case .senderLoopback(let id):
                 guard next.senderLoopbackEmbargoes.remove(id) != nil else {
                     throw RPCProtocolError.embargoMismatch(id)
                 }
             case .receiverLoopback(let id):
+                try validateTarget(try disembargo.target, state: next)
                 guard next.receiverLoopbackEmbargoes.insert(id).inserted else {
                     throw RPCProtocolError.embargoMismatch(id)
                 }

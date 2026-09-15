@@ -138,9 +138,9 @@ public struct CapabilityClient: @unchecked Sendable {
     let target: any CapabilityCallTarget
     public let tableIndex: UInt32?
 
-    public init(target: any CapabilityCallTarget) {
+    public init(target: any CapabilityCallTarget, tableIndex: UInt32? = nil) {
         self.target = target
-        tableIndex = nil
+        self.tableIndex = tableIndex
     }
 
     public init(pointer: AnyPointerReader) {

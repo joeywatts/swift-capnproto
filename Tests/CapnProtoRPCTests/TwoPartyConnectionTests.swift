@@ -130,3 +130,26 @@ private actor NeverReturnWireService: CapabilityCallTarget {
     await client.close()
     await server.close()
 }
+
+// Adapts the sender/receiver-loopback disembargo and call-order regressions in
+// rpc-test.c++ at the pinned upstream commit above.
+@Test func disembargoFormsAnOrderingBarrierBetweenCalls() async throws {
+    let service = WireService()
+    let (a, b) = InMemoryRPCTransport.makePair(configuration: .init(fragmentSize: 2))
+    let client = TwoPartyRPCConnection(side: .client, transport: a)
+    let server = TwoPartyRPCConnection(
+        side: .server, transport: b, bootstrap: CapabilityClient(target: service))
+    await client.start()
+    await server.start()
+    let remote = try await client.bootstrap()
+    let id = try #require(remote.tableIndex)
+
+    _ = try await remote.call(wireMethod, params: wireValue(1))
+    try await client.establishOrderingBarrier(for: id)
+    _ = try await remote.call(wireMethod, params: wireValue(2))
+    #expect(service.values == [1, 2])
+    #expect((await client.snapshot).embargoes == 0)
+    #expect((await server.snapshot).embargoes == 0)
+    await client.close()
+    await server.close()
+}
