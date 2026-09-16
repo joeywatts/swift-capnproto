@@ -20,7 +20,7 @@ public struct SchemaLoader {
     @discardableResult
     public mutating func load(_ node: SchemaNode) throws -> SchemaNode {
         if let current = registry.schema(id: node.id) {
-            let compatibility = SchemaLoader.compatibility(of: node, with: current)
+            let compatibility = compatibilityConsideringGroups(of: node, with: current)
             guard compatibility.canReadExisting || compatibility.canWriteExisting else {
                 throw SchemaError.incompatibleReplacement(node.id)
             }
@@ -44,7 +44,15 @@ public struct SchemaLoader {
 
     @discardableResult
     public mutating func load(request: Schema.CodeGeneratorRequest) throws -> [SchemaNode] {
-        var loaded = try load(request.nodes)
+        let decoded = try request.nodes.map(SchemaNode.init)
+        let ordered = decoded.sorted { isGroup($0) && !isGroup($1) }
+        for node in ordered { try load(node) }
+        var loaded = try decoded.map { node in
+            guard let loaded = registry.schema(id: node.id) else {
+                throw SchemaError.missingSchema(node.id)
+            }
+            return loaded
+        }
         for requestedFile in try request.requestedFiles {
             let id = try requestedFile.id
             guard var file = registry.schema(id: id) else { throw SchemaError.missingSchema(id) }
@@ -108,6 +116,73 @@ public struct SchemaLoader {
         default:
             return .init(canReadExisting: false, canWriteExisting: false, isEquivalent: false)
         }
+    }
+
+    private func compatibilityConsideringGroups(
+        of candidate: SchemaNode, with existing: SchemaNode
+    ) -> SchemaCompatibility {
+        guard case let .structure(cd, cp, _, _, _, _, candidateFields) = candidate.kind,
+            case let .structure(ed, ep, _, _, _, _, existingFields) = existing.kind,
+            let flattenedCandidate = flatten(candidateFields),
+            let flattenedExisting = flatten(existingFields)
+        else { return Self.compatibility(of: candidate, with: existing) }
+
+        let reads = fields(flattenedExisting, areContainedIn: flattenedCandidate)
+        let writes = fields(flattenedCandidate, areContainedIn: flattenedExisting)
+        let canRead = reads && cd >= ed && cp >= ep
+        let canWrite = writes && ed >= cd && ep >= cp
+        return .init(
+            canReadExisting: canRead, canWriteExisting: canWrite,
+            isEquivalent: canRead && canWrite)
+    }
+
+    private func flatten(_ fields: [SchemaField], inheritedTag: UInt16? = nil)
+        -> [SchemaField]?
+    {
+        var result: [SchemaField] = []
+        for var field in fields {
+            let tag = field.discriminantValue ?? inheritedTag
+            switch field.storage {
+            case .slot:
+                field.discriminantValue = tag
+                result.append(field)
+            case .group(let typeID):
+                guard let group = registry.schema(id: typeID),
+                    case .structure(_, _, _, _, _, _, let children) = group.kind,
+                    let flattened = flatten(children, inheritedTag: tag)
+                else { return nil }
+                result.append(contentsOf: flattened)
+            }
+        }
+        return result
+    }
+}
+
+private func isGroup(_ node: SchemaNode) -> Bool {
+    guard case .structure(_, _, _, let value, _, _, _) = node.kind else { return false }
+    return value
+}
+
+private func fields(_ subset: [SchemaField], areContainedIn superset: [SchemaField]) -> Bool {
+    var remaining = superset
+    for field in subset {
+        guard let index = remaining.firstIndex(where: { fieldsEvolutionCompatible(field, $0) })
+        else { return false }
+        remaining.remove(at: index)
+    }
+    return true
+}
+
+private func fieldsEvolutionCompatible(_ lhs: SchemaField, _ rhs: SchemaField) -> Bool {
+    let tagsMatch =
+        lhs.discriminantValue == rhs.discriminantValue
+        || lhs.discriminantValue == 0 && rhs.discriminantValue == nil
+        || lhs.discriminantValue == nil && rhs.discriminantValue == 0
+    guard tagsMatch else { return false }
+    switch (lhs.storage, rhs.storage) {
+    case let (.slot(lo, lt, ld), .slot(ro, rt, rd)):
+        return lo == ro && typesWireCompatible(lt, rt) && defaultsWireCompatible(ld, rd)
+    default: return false
     }
 }
 

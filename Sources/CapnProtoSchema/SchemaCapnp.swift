@@ -297,7 +297,7 @@ public enum Schema {
         public var kind: TypeKind { get throws { TypeKind(try value.integer(atByte: 0)) } }
         public var elementType: Type { get throws { Type(try value.structField(at: 0)) } }
         public var typeID: ID { get throws { try value.integer(atByte: 8) } }
-        public var brand: Brand { get throws { Brand(try value.structField(at: 1)) } }
+        public var brand: Brand { get throws { Brand(try value.structField(at: 0)) } }
         public var anyPointerKind: AnyPointerKind {
             get throws {
                 switch try value.integer(atByte: 8, as: UInt16.self) {

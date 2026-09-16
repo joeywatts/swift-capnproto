@@ -2,7 +2,7 @@ import CapnProto
 import CapnProtoSchema
 
 public enum CapnProtoCompilerRuntime {
-    public static let isImplemented = false
+    public static let isImplemented = true
 }
 
 public struct GeneratedSwiftFile: Equatable, Sendable {
