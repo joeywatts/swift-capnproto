@@ -10,7 +10,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-15, ubuntu-24.04, ubuntu-24.04-arm]
+        os: [macos-15, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -35,3 +35,13 @@ jobs:
           path: |
             .build/release/swift-capnproto-*.tar.gz
             .build/release/SHA256SUMS
+
+  release-profile-arm64:
+    runs-on: ubuntu-24.04-arm
+    container: swift:6.2-noble
+    steps:
+      - uses: actions/checkout@v4
+      - run: swift --version
+      - run: swift build
+      - run: Scripts/verify-swift-tests.sh
+      - run: swift build --package-path Tests/Consumer -c release
