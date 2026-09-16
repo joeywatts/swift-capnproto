@@ -17,19 +17,23 @@ jobs:
         with:
           swift-version: "6.2"
       - run: swift build
-      - run: swift format lint --recursive --strict Sources Tests/Support Tests/*Tests Fuzz Benchmarks Plugins
-      - run: swift test --disable-xctest --enable-swift-testing
+      - run: swift format lint --recursive --strict Sources Tests/Support Tests/*Tests Fuzz Benchmarks Plugins Examples
+      - run: Scripts/verify-swift-tests.sh
       # Linux Foundation leaks one process-global 32-byte allocation.
       # Keep AddressSanitizer enabled there while disabling only LeakSanitizer.
       - if: runner.os == 'Linux'
-        run: swift test --disable-xctest --enable-swift-testing --sanitize=address
+        run: Scripts/verify-swift-tests.sh --sanitize=address
         env:
           ASAN_OPTIONS: detect_leaks=0
       - if: runner.os != 'Linux'
-        run: swift test --disable-xctest --enable-swift-testing --sanitize=address
+        run: Scripts/verify-swift-tests.sh --sanitize=address
       - run: Scripts/check-package-boundaries.sh
       - run: Scripts/verify-upstream.sh
+      - run: Scripts/verify-conformance-ledger.sh
       - run: Scripts/verify-capnp-test.sh
       - run: Scripts/verify-fixtures.sh
       - run: Scripts/verify-fuzz-targets.sh
+      - run: Scripts/verify-security-limits.sh
+      - run: Scripts/verify-examples.sh
+      - run: Scripts/verify-documentation.sh
       - run: Scripts/run-benchmarks.sh

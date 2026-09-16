@@ -1,0 +1,37 @@
+name: Release candidate
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  release-profile:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.2"
+      - run: Scripts/run-release-profile.sh
+      - if: runner.os == 'Linux'
+        run: Scripts/verify-swift-tests.sh --sanitize=address
+        env:
+          ASAN_OPTIONS: detect_leaks=0
+      - if: runner.os != 'Linux'
+        run: Scripts/verify-swift-tests.sh --sanitize=address
+      - if: startsWith(github.ref, 'refs/tags/') && runner.os == 'Linux' && runner.arch == 'X64'
+        run: Scripts/create-source-release.sh
+      - if: startsWith(github.ref, 'refs/tags/') && runner.os == 'Linux' && runner.arch == 'X64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: swift-capnproto-source-${{ github.ref_name }}
+          path: |
+            .build/release/swift-capnproto-*.tar.gz
+            .build/release/SHA256SUMS
