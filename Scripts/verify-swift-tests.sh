@@ -12,6 +12,6 @@ suites=(
   CapnProtoRPCTests
 )
 for suite in "${suites[@]}"; do
-  swift test --disable-xctest --enable-swift-testing "$@" --filter "$suite"
+  swift test --disable-xctest --enable-swift-testing --no-parallel "$@" --filter "$suite"
 done
 echo "all Swift test targets passed"
