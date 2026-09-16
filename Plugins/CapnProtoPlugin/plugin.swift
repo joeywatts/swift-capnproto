@@ -5,9 +5,7 @@ import PackagePlugin
 struct CapnProtoPlugin: BuildToolPlugin {
     func createBuildCommands(context: PluginContext, target: Target) async throws -> [Command] {
         guard let sourceTarget = target as? SourceModuleTarget else { return [] }
-        let targetDirectory = URL(
-            fileURLWithPath: sourceTarget.directory.string, isDirectory: true
-        ).resolvingSymlinksInPath()
+        let targetDirectory = sourceTarget.directoryURL.resolvingSymlinksInPath()
         let configurationURL = targetDirectory.appending(path: ".capnp-swift.json")
         let configuration = try loadConfiguration(at: configurationURL)
         if let moduleName = configuration.moduleName, moduleName != sourceTarget.name {
