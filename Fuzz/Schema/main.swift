@@ -12,4 +12,5 @@ for path in CommandLine.arguments.dropFirst() {
     _ = SchemaRequestFuzzTarget.consume(bytes)
     let source = SourceFile(name: path, bytes: bytes)
     _ = CapnProtoLexer().tokens(in: source)
+    _ = CapnProtoParser().parse(source)
 }
