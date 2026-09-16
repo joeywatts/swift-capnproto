@@ -7,7 +7,7 @@ count=0
 while IFS=$'\t' read -r boundary implementation regression; do
   [[ -z "$boundary" || "$boundary" == \#* ]] && continue
   [[ -f "$root/$implementation" ]] || { echo "missing limit implementation: $implementation" >&2; exit 1; }
-  rg -q "func $regression\\b" "$root/Tests" || {
+  grep -ERq "func ${regression}([^[:alnum:]_]|$)" "$root/Tests" || {
     echo "missing boundary regression for $boundary: $regression" >&2
     exit 1
   }
