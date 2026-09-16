@@ -5,11 +5,13 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 prefix="$($root/Scripts/prepare-reference-capnp.sh)"
 capnp="$prefix/bin/capnp"
 tool="$root/.build/debug/capnpc-swift"
+native="$root/.build/debug/capnp-swift"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
 cd "$root"
 swift build --product capnpc-swift
+swift build --product capnp-swift
 
 mkdir -p "$work/malformed output"
 if printf 'not a code generator request' | (cd "$work/malformed output" && "$tool") \
@@ -25,7 +27,7 @@ if find "$work/malformed output" -name '*.swift' -print -quit | grep -q .; then
 fi
 
 mkdir -p "$work/source errors"
-if "$capnp" compile -o"$tool:$work/source errors" \
+if "$native" compile -o "$work/source errors" \
   "$root/Tests/CapnProtoCompilerTests/Fixtures/malformed.capnp" \
   >"$work/source.stdout" 2>"$work/source.stderr"
 then

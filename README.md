@@ -21,11 +21,23 @@ verification criteria are described in [ROADMAP.md](ROADMAP.md).
 - `CapnProtoRPC`: capability APIs and the RPC protocol state machine.
 - `CapnProtoNIO`: optional SwiftNIO networking support.
 - `CapnProtoCompiler`, `capnpc-swift`, and `capnp-swift`: generated Swift
-  bindings and an eventually self-contained schema compiler.
+  bindings and a self-contained schema compiler.
 
 No shipped target will link the Cap'n Proto C++ implementation. The reference
 `capnp` tools in the development shell are used only to generate fixtures and
 verify wire and RPC interoperability.
+
+Compile schemas directly with the native frontend:
+
+```sh
+swift run capnp-swift compile -I Schemas --src-prefix Schemas -o Generated Schemas/app.capnp
+swift run capnp-swift inspect -I Schemas Schemas/app.capnp
+swift run capnp-swift id 0xdeadbeefdeadbeef ChildName
+```
+
+`compile` can also write its framed `CodeGeneratorRequest` with
+`--request-output`, and `normalize-request` emits a stable wire-layout summary
+used by the differential compiler tests.
 
 ## Development environment
 

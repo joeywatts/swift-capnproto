@@ -2,7 +2,6 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
-prefix="$($root/Scripts/prepare-reference-capnp.sh)"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 example="$work/plugin example with spaces"
@@ -12,7 +11,14 @@ cp -R "$root/Examples/PluginExample/Sources" "$example/Sources"
 
 build_example() {
   local report="$1"
-  if ! PATH="$prefix/bin:$PATH" SWIFT_CAPNPROTO_PATH="$root" \
+  local clean_path=""
+  local directory
+  while IFS= read -r directory; do
+    if [[ ! -x "$directory/capnp" ]]; then
+      clean_path="${clean_path:+$clean_path:}$directory"
+    fi
+  done < <(tr ':' '\n' <<< "$PATH")
+  if ! PATH="$clean_path" SWIFT_CAPNPROTO_PATH="$root" \
     swift build --package-path "$example" >"$report" 2>&1
   then
     cat "$report" >&2
@@ -56,4 +62,4 @@ output="$("$example/.build/debug/PluginExample")"
   exit 1
 }
 
-echo "SwiftPM plugin clean, incremental, import, module, and path-space checks passed"
+echo "SwiftPM plugin clean, incremental, import, module, path-space, and capnp-free checks passed"

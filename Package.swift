@@ -81,7 +81,7 @@ let package = Package(
         ),
         .plugin(
             name: "CapnProtoPlugin", capability: .buildTool(),
-            dependencies: ["capnpc-swift"]),
+            dependencies: ["capnp-swift"]),
         .testTarget(
             name: "CapnProtoTests", dependencies: ["CapnProto", "CapnProtoTestSupport"]),
         .testTarget(

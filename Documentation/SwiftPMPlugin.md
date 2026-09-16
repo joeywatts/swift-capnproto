@@ -17,9 +17,9 @@ schemas found in the target and configured import roots are declared as inputs,
 so unrelated source changes do not rerun code generation while schema and import
 changes do.
 
-The plugin invokes `capnp` from `PATH` and uses the package-built
-`capnpc-swift`; consumers therefore need a compatible Cap'n Proto compiler at
-build time, but generated programs do not link C or C++ libraries.
+The plugin invokes the package-built, self-contained `capnp-swift` compiler.
+Consumers do not need the upstream `capnp` executable, and generated programs
+do not link C or C++ libraries.
 
 An optional `.capnp-swift.json` at the target root configures import roots and
 asserts the intended Swift module name:

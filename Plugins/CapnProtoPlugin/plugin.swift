@@ -5,9 +5,9 @@ import PackagePlugin
 struct CapnProtoPlugin: BuildToolPlugin {
     func createBuildCommands(context: PluginContext, target: Target) async throws -> [Command] {
         guard let sourceTarget = target as? SourceModuleTarget else { return [] }
-        let targetDirectoryPath = sourceTarget.directory
-        let targetDirectory = URL(fileURLWithPath: targetDirectoryPath.string, isDirectory: true)
-            .resolvingSymlinksInPath()
+        let targetDirectory = URL(
+            fileURLWithPath: sourceTarget.directory.string, isDirectory: true
+        ).resolvingSymlinksInPath()
         let configurationURL = targetDirectory.appending(path: ".capnp-swift.json")
         let configuration = try loadConfiguration(at: configurationURL)
         if let moduleName = configuration.moduleName, moduleName != sourceTarget.name {
@@ -32,20 +32,19 @@ struct CapnProtoPlugin: BuildToolPlugin {
             inputFiles.insert(configurationURL)
         }
 
-        let capnp = try findExecutable(named: "capnp")
-        let generator = try context.tool(named: "capnpc-swift").path
+        let compiler = try context.tool(named: "capnp-swift").url
         return try schemas.map { schema in
             let relative = try relativePath(of: schema, below: targetDirectory)
-            let output = context.pluginWorkDirectory.appending(subpath: relative + ".swift")
+            let output = context.pluginWorkDirectoryURL.appending(path: relative + ".swift")
             let importArguments = importRoots.map { "-I\($0.path)" }
             return .buildCommand(
                 displayName: "Generating Swift from \(relative)",
-                executable: capnp,
+                executable: compiler,
                 arguments: [
-                    "compile", "-o\(generator.string):\(context.pluginWorkDirectory.string)",
-                    "--src-prefix=\(targetDirectory.path)",
+                    "compile", "--output", context.pluginWorkDirectoryURL.path,
+                    "--src-prefix", targetDirectory.path,
                 ] + importArguments + [schema.path],
-                inputFiles: inputFiles.sorted { $0.path < $1.path }.map { Path($0.path) },
+                inputFiles: inputFiles.sorted { $0.path < $1.path },
                 outputFiles: [output]
             )
         }
@@ -104,16 +103,4 @@ private func relativePath(of file: URL, below directory: URL) throws -> String {
         throw PluginFailure("schema is outside target directory: \(path)")
     }
     return String(path.dropFirst(root.count + 1))
-}
-
-private func findExecutable(named name: String) throws -> Path {
-    let environment = ProcessInfo.processInfo.environment
-    for directory in environment["PATH", default: ""].split(separator: ":") {
-        let candidate = URL(fileURLWithPath: String(directory), isDirectory: true)
-            .appending(path: name)
-        if FileManager.default.isExecutableFile(atPath: candidate.path) {
-            return Path(candidate.path)
-        }
-    }
-    throw PluginFailure("\(name) was not found on PATH")
 }
