@@ -24,12 +24,14 @@
             packages = with pkgs;
               [
                 capnproto
+                cargo
                 cmake
                 git
                 jq
                 ninja
                 pkg-config
                 ripgrep
+                rustc
               ]
               ++ lib.optionals stdenv.hostPlatform.isLinux [ swift ];
 

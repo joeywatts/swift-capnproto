@@ -1,5 +1,6 @@
 /// Alignment-independent little-endian scalar access.
 public enum LittleEndian {
+    @inline(__always)
     public static func loadInteger<T: FixedWidthInteger>(
         _ type: T.Type = T.self,
         from bytes: [UInt8],
@@ -12,13 +13,14 @@ public enum LittleEndian {
         } catch {
             throw CapnProtoError.arithmeticOverflow
         }
-        var result: T = 0
-        for (shift, index) in range.enumerated() {
-            result |= T(truncatingIfNeeded: bytes[index]) << T(shift * 8)
+        _ = range
+        let stored = bytes.withUnsafeBytes {
+            $0.loadUnaligned(fromByteOffset: offset, as: T.self)
         }
-        return result
+        return T(littleEndian: stored)
     }
 
+    @inline(__always)
     public static func storeInteger<T: FixedWidthInteger>(
         _ value: T,
         to bytes: inout [UInt8],

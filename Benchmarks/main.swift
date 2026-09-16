@@ -17,7 +17,7 @@ func report(_ name: String, _ body: () -> UInt64) {
     let duration = start.duration(to: clock.now).components
     let nanoseconds = duration.seconds * 1_000_000_000 + duration.attoseconds / 1_000_000_000
     print(
-        "{\"benchmark\":\"\(name)\",\"iterations\":\(iterations),\"nanoseconds\":\(nanoseconds),\"checksum\":\(checksum)}"
+        "{\"implementation\":\"swift\",\"benchmark\":\"\(name)\",\"iterations\":\(iterations),\"nanoseconds\":\(nanoseconds),\"checksum\":\(checksum)}"
     )
 }
 

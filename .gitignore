@@ -1,5 +1,6 @@
 # Swift Package Manager
 .build/
+Tools/Benchmarks/Rust/target/
 .swiftpm/
 Package.resolved
 

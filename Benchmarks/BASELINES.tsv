@@ -1,0 +1,6 @@
+# benchmark	baseline nanoseconds/iteration	major regression factor
+decode	1000	8
+traversal	20000	8
+build	1500	8
+serialize	750	8
+packed-io	1500	8
