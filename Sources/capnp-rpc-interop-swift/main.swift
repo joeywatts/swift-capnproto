@@ -83,7 +83,7 @@ private final class BootstrapService: CapabilityCallTargetWithCaps, @unchecked S
                 await connection.start()
             }
             print(listener.localAddress!.port!)
-            fflush(stdout)
+            fflush(nil)
             await completion.wait()
             await completion.closeConnectionAfterReply()
             await listener.close()
