@@ -6,6 +6,19 @@ public enum AllocationStrategy: Equatable, Sendable {
     case growing
 }
 
+/// Resource ceilings applied to all allocations made by a message builder.
+/// The defaults match the reader and framing limits, so a default-built message
+/// can always be consumed by a default reader.
+public struct BuilderOptions: Equatable, Sendable {
+    public var maximumSegments: Int
+    public var maximumTotalWords: Int
+
+    public init(maximumSegments: Int = 512, maximumTotalWords: Int = 8 * 1024 * 1024) {
+        self.maximumSegments = maximumSegments
+        self.maximumTotalWords = maximumTotalWords
+    }
+}
+
 /// The stable location of an allocation in a message builder.
 public struct SegmentAllocation: Equatable, Sendable {
     public let segmentID: Int
@@ -31,12 +44,19 @@ final class BuilderArena {
     private(set) var segments: [BuilderSegment]
     let firstSegmentWords: Int
     let strategy: AllocationStrategy
+    let options: BuilderOptions
+    private var allocatedWords = 0
 
-    init(firstSegmentWords: Int, strategy: AllocationStrategy) throws {
-        guard firstSegmentWords >= 0 else { throw CapnProtoError.arithmeticOverflow }
+    init(firstSegmentWords: Int, strategy: AllocationStrategy, options: BuilderOptions) throws {
+        guard firstSegmentWords >= 0, firstSegmentWords <= options.maximumTotalWords,
+            options.maximumSegments > 0,
+            options.maximumTotalWords >= 1
+        else { throw CapnProtoError.allocationLimitExceeded }
         self.firstSegmentWords = max(firstSegmentWords, 1)
         self.strategy = strategy
-        let byteCount = try checkedMultiply(max(firstSegmentWords, 1), 8)
+        self.options = options
+        let initialWords = max(firstSegmentWords, 1)
+        let byteCount = try checkedMultiply(initialWords, 8)
         segments = [
             BuilderSegment(id: 0, bytes: [UInt8](repeating: 0, count: byteCount), usedWords: 0)
         ]
@@ -44,6 +64,10 @@ final class BuilderArena {
 
     func allocate(words: Int, preferredSegment: Int? = nil) throws -> SegmentAllocation {
         guard words >= 0 else { throw CapnProtoError.arithmeticOverflow }
+        let nextAllocated = try checkedAdd(allocatedWords, words)
+        guard nextAllocated <= options.maximumTotalWords else {
+            throw CapnProtoError.allocationLimitExceeded
+        }
         if let preferredSegment, segments.indices.contains(preferredSegment),
             words <= segments[preferredSegment].capacityWords - segments[preferredSegment].usedWords
         {
@@ -64,7 +88,11 @@ final class BuilderArena {
             proposed = try checkedMultiply(previousCapacity, 2)
         }
         let capacity = max(words, proposed)
-        let byteCount = try checkedMultiply(capacity, 8)
+        guard segments.count < options.maximumSegments else {
+            throw CapnProtoError.allocationLimitExceeded
+        }
+        let boundedCapacity = min(capacity, options.maximumTotalWords - allocatedWords)
+        let byteCount = try checkedMultiply(boundedCapacity, 8)
         let id = segments.count
         segments.append(
             BuilderSegment(id: id, bytes: [UInt8](repeating: 0, count: byteCount), usedWords: 0))
@@ -74,6 +102,7 @@ final class BuilderArena {
     private func consume(words: Int, in segmentID: Int) -> SegmentAllocation {
         let start = segments[segmentID].usedWords
         segments[segmentID].usedWords += words
+        allocatedWords += words
         return SegmentAllocation(segmentID: segmentID, startWord: start, wordCount: words)
     }
 
@@ -83,6 +112,10 @@ final class BuilderArena {
     func allocateInSegment(words: Int, segmentID: Int) throws -> SegmentAllocation {
         guard segments.indices.contains(segmentID), words >= 0 else {
             throw CapnProtoError.arithmeticOverflow
+        }
+        let nextAllocated = try checkedAdd(allocatedWords, words)
+        guard nextAllocated <= options.maximumTotalWords else {
+            throw CapnProtoError.allocationLimitExceeded
         }
         let required = try checkedAdd(segments[segmentID].usedWords, words)
         if required > segments[segmentID].capacityWords {
@@ -139,10 +172,11 @@ public final class MessageBuilder {
 
     public init(
         firstSegmentWords: Int = 1024,
-        allocationStrategy: AllocationStrategy = .growing
+        allocationStrategy: AllocationStrategy = .growing,
+        options: BuilderOptions = BuilderOptions()
     ) throws {
         arena = try BuilderArena(
-            firstSegmentWords: firstSegmentWords, strategy: allocationStrategy)
+            firstSegmentWords: firstSegmentWords, strategy: allocationStrategy, options: options)
         _ = try arena.allocate(words: 1, preferredSegment: 0)  // Root pointer.
     }
 

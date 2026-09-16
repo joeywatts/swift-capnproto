@@ -17,6 +17,22 @@ public enum RPCProtocolError: Error, Equatable, Sendable {
     case unsupportedThirdPartyCapability
     case embargoMismatch(UInt32)
     case messageTooLarge
+    case tableLimitExceeded
+}
+
+public struct RPCValidationLimits: Equatable, Sendable {
+    public var maximumQuestions: Int
+    public var maximumCapabilities: Int
+    public var maximumEmbargoes: Int
+
+    public init(
+        maximumQuestions: Int = 65_536, maximumCapabilities: Int = 65_536,
+        maximumEmbargoes: Int = 65_536
+    ) {
+        self.maximumQuestions = maximumQuestions
+        self.maximumCapabilities = maximumCapabilities
+        self.maximumEmbargoes = maximumEmbargoes
+    }
 }
 
 /// IDs visible to the protocol validator. Validation is transactional: callers
@@ -67,7 +83,8 @@ public enum RPCWireValidator {
     /// Validates every referenced ID and union tag and commits transitions only
     /// after all nested fields have been inspected.
     public static func validate(
-        _ message: Message.Reader, state: inout RPCWireValidationState
+        _ message: Message.Reader, state: inout RPCWireValidationState,
+        limits: RPCValidationLimits = RPCValidationLimits()
     ) throws {
         var next = state
         switch try message.which {
@@ -152,6 +169,13 @@ public enum RPCWireValidator {
         case .unknown(let tag):
             throw RPCProtocolError.unknownMessageVariant(tag)
         }
+        guard limits.maximumQuestions >= 0, limits.maximumCapabilities >= 0,
+            limits.maximumEmbargoes >= 0,
+            next.inboundQuestions.count + next.outboundQuestions.count <= limits.maximumQuestions,
+            next.exports.count + next.imports.count <= limits.maximumCapabilities,
+            next.senderLoopbackEmbargoes.count + next.receiverLoopbackEmbargoes.count
+                <= limits.maximumEmbargoes
+        else { throw RPCProtocolError.tableLimitExceeded }
         state = next
     }
 

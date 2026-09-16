@@ -21,8 +21,11 @@ public final class CapabilityTable: @unchecked Sendable {
     private let lock = NSLock()
     private var entries: [UInt32: Entry] = [:]
     private var nextID: UInt32 = 0
+    private let maximumEntries: Int
 
-    public init() {}
+    public init(maximumEntries: Int = 65_536) {
+        self.maximumEntries = max(0, maximumEntries)
+    }
 
     public func insert(
         _ client: CapabilityClient, references: Int = 1,
@@ -30,6 +33,9 @@ public final class CapabilityTable: @unchecked Sendable {
     ) throws -> UInt32 {
         guard references > 0 else { throw CapabilityTableError.invalidReferenceCount }
         return try lock.withLock {
+            guard entries.count < maximumEntries else {
+                throw CapabilityTableError.tableLimitExceeded
+            }
             guard nextID != UInt32.max else { throw CapabilityTableError.idExhausted }
             let id = nextID
             nextID += 1
@@ -94,6 +100,7 @@ public enum CapabilityTableError: Error, Equatable, Sendable {
     case invalidReferenceCount
     case idExhausted
     case referenceCountOverflow
+    case tableLimitExceeded
     case unknownID(UInt32)
     case releaseUnderflow(UInt32)
 }

@@ -203,6 +203,17 @@ private final class NeverReturnTarget: CapabilityCallTarget, @unchecked Sendable
     #expect(table.snapshot == .init(entries: 0, references: 0))
 }
 
+@Test func capabilityTableLimitAcceptsBoundaryAndRejectsGrowth() throws {
+    let table = CapabilityTable(maximumEntries: 1)
+    let id = try table.insert(.null)
+    #expect(table.snapshot.entries == 1)
+    #expect(throws: CapabilityTableError.tableLimitExceeded) {
+        try table.insert(.null)
+    }
+    try table.release(id)
+    #expect(table.snapshot.entries == 0)
+}
+
 @Test func connectionDisconnectCancelsOperationsAndEmptiesAllTables() async throws {
     let (transport, peer) = InMemoryRPCTransport.makePair()
     let state = RPCConnectionState()

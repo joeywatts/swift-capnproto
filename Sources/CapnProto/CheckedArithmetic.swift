@@ -19,6 +19,7 @@ public enum CapnProtoError: Error, Equatable, CustomStringConvertible {
     case frameTooLarge
     case invalidPackedData
     case packedOutputLimitExceeded
+    case allocationLimitExceeded
     case invalidCanonicalForm
 
     public var description: String {
@@ -44,6 +45,7 @@ public enum CapnProtoError: Error, Equatable, CustomStringConvertible {
         case .frameTooLarge: "stream frame exceeds configured limits"
         case .invalidPackedData: "invalid or truncated packed data"
         case .packedOutputLimitExceeded: "packed data exceeds the output limit"
+        case .allocationLimitExceeded: "message allocation exceeds configured limits"
         case .invalidCanonicalForm: "message graph cannot be canonicalized"
         }
     }

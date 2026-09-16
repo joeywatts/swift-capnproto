@@ -31,8 +31,27 @@ import Testing
 @Test func allocationRejectsInvalidAndOverflowingSizes() throws {
     let message = try MessageBuilder(firstSegmentWords: 1)
     #expect(throws: CapnProtoError.arithmeticOverflow) { try message.allocate(words: -1) }
-    #expect(throws: CapnProtoError.arithmeticOverflow) {
+    #expect(throws: CapnProtoError.allocationLimitExceeded) {
         _ = try MessageBuilder(firstSegmentWords: Int.max)
+    }
+}
+
+@Test func builderAllocationLimitsAcceptBoundaryAndRejectOnePastIt() throws {
+    let message = try MessageBuilder(
+        firstSegmentWords: 1, allocationStrategy: .fixedSize,
+        options: BuilderOptions(maximumSegments: 3, maximumTotalWords: 3))
+    _ = try message.allocate(words: 1)
+    _ = try message.allocate(words: 1)
+    #expect(message.segmentCount == 3)
+    #expect(throws: CapnProtoError.allocationLimitExceeded) {
+        try message.allocate(words: 1)
+    }
+
+    let segmentLimited = try MessageBuilder(
+        firstSegmentWords: 1, allocationStrategy: .fixedSize,
+        options: BuilderOptions(maximumSegments: 1, maximumTotalWords: 3))
+    #expect(throws: CapnProtoError.allocationLimitExceeded) {
+        try segmentLimited.allocate(words: 1)
     }
 }
 

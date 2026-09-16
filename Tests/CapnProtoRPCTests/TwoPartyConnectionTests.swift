@@ -88,6 +88,17 @@ private final class WireService: CapabilityCallTarget, @unchecked Sendable {
     var values: [UInt32] { lock.withLock { receivedValues } }
 }
 
+@Test func connectionRejectsQuestionGrowthAtConfiguredBoundary() async throws {
+    let (transport, peer) = InMemoryRPCTransport.makePair()
+    let connection = TwoPartyRPCConnection(
+        side: .client, transport: transport, maximumTableEntries: 0)
+    await #expect(throws: RPCProtocolError.tableLimitExceeded) {
+        _ = try await connection.beginBootstrap()
+    }
+    await connection.close()
+    await peer.close()
+}
+
 // Adapts Rpc.Pipelining, Rpc.PromiseResolve, and call-order cases from
 // rpc-test.c++ at the pinned upstream commit above.
 @Test func promisedAnswerCallsAreSentBeforeBootstrapResolutionAndStayOrdered() async throws {
@@ -137,7 +148,7 @@ private final class WireService: CapabilityCallTarget, @unchecked Sendable {
         throws: CapabilityError.broken(
             RemoteException(
                 kind: .failed,
-                reason: "unknownMethod(interfaceID: 65261, methodID: 99)"))
+                reason: "remote call failed"))
     ) {
         _ = try await remote!.call(unknown, params: wireValue(0))
     }

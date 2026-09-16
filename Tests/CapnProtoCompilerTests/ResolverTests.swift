@@ -2,6 +2,30 @@ import CapnProtoCompiler
 import Foundation
 import Testing
 
+@Test func compilerRejectsSourceAndFileGrowthAtConfiguredBoundaries() throws {
+    let directory = FileManager.default.temporaryDirectory.appending(
+        path: "swift-capnproto-compiler-limits-\(UUID().uuidString)", directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let first = directory.appending(path: "first.capnp")
+    let second = directory.appending(path: "second.capnp")
+    let firstSource = "@0x8000000000000001; using Other = import \"second.capnp\";"
+    try Data(firstSource.utf8).write(to: first)
+    try Data("@0x8000000000000002;".utf8).write(to: second)
+
+    let bytesLimited = NativeSchemaCompiler(
+        configuration: CompilerConfiguration(maximumSourceBytes: firstSource.utf8.count - 1)
+    ).resolve(files: [first])
+    #expect(bytesLimited.diagnostics.contains { $0.message == "schema source byte limit exceeded" })
+
+    let filesLimited = NativeSchemaCompiler(
+        configuration: CompilerConfiguration(importPaths: [directory], maximumFiles: 1)
+    ).resolve(files: [first])
+    #expect(filesLimited.files.count == 1)
+    #expect(filesLimited.diagnostics.contains { $0.message == "schema file limit exceeded" })
+}
+
 @Test func resolverLoadsImportsGeneratesIDsAndResolvesAliases() throws {
     let directory = FileManager.default.temporaryDirectory
         .appending(

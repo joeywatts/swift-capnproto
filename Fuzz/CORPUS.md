@@ -7,6 +7,8 @@ upstream implementation and cover raw, framed, packed, and multi-segment data.
 The deterministic property tests additionally generate truncated, extended,
 and arbitrary byte sequences from a recorded seed. `Fuzz/Seeds` contains small
 explicit malformed inputs for direct command-line and sanitizer runs.
+`Fuzz/Mutation` commits reduced mutations for segment-count overflow, deep
+pointer traversal, and packed expansion; all three entry points consume them.
 
 `Scripts/verify-fuzz-targets.sh` runs every upstream-derived seed through all
 targets. Rejected syntax is an expected result; a trap, sanitizer report, hang,

@@ -6,6 +6,13 @@ public enum CapnProtoRPCRuntime {
     public static let isImplemented = true
 }
 
+/// Controls whether an unexpected local error description may cross an RPC
+/// boundary. Known `RemoteException` values are always forwarded unchanged.
+public enum RPCErrorDisclosurePolicy: Equatable, Sendable {
+    case redacted
+    case localDescription
+}
+
 public struct CapabilityMethodDescriptor: Equatable, Hashable, Sendable {
     public let interfaceID: UInt64
     public let methodID: UInt16

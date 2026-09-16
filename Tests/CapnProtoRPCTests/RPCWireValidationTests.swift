@@ -10,6 +10,24 @@ private func rpcBytes(_ configure: (Message.Builder) throws -> Void) throws -> [
     return try message.framedBytes
 }
 
+@Test func validatorAppliesQuestionTableLimitTransactionally() throws {
+    var state = RPCWireValidationState()
+    let first = try RPCWireValidator.decode(
+        rpcBytes { root in try root.initBootstrap().setQuestionId(1) })
+    try RPCWireValidator.validate(
+        first, state: &state,
+        limits: RPCValidationLimits(maximumQuestions: 1))
+    let before = state
+    let second = try RPCWireValidator.decode(
+        rpcBytes { root in try root.initBootstrap().setQuestionId(2) })
+    #expect(throws: RPCProtocolError.tableLimitExceeded) {
+        try RPCWireValidator.validate(
+            second, state: &state,
+            limits: RPCValidationLimits(maximumQuestions: 1))
+    }
+    #expect(state == before)
+}
+
 // Ports the malformed-message/table-transition boundary exercised throughout
 // rpc-test.c++ at pinned commit 3a82de9b39736a2625f03c93b2b7c50642dd5b25.
 @Test func generatedRPCSchemaRoundTripsAndRejectsMalformedVariantsTransactionally() throws {

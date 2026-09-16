@@ -4,11 +4,18 @@ public struct CompilerConfiguration: Equatable, Sendable {
     public var importPaths: [URL]
     public var requireFileID: Bool
     public var sourcePrefix: URL?
+    public var maximumSourceBytes: Int
+    public var maximumFiles: Int
 
-    public init(importPaths: [URL] = [], requireFileID: Bool = true, sourcePrefix: URL? = nil) {
+    public init(
+        importPaths: [URL] = [], requireFileID: Bool = true, sourcePrefix: URL? = nil,
+        maximumSourceBytes: Int = 16 * 1024 * 1024, maximumFiles: Int = 1_024
+    ) {
         self.importPaths = importPaths
         self.requireFileID = requireFileID
         self.sourcePrefix = sourcePrefix
+        self.maximumSourceBytes = maximumSourceBytes
+        self.maximumFiles = maximumFiles
     }
 }
 
@@ -99,10 +106,37 @@ private struct Loader {
             }
             return
         }
+        guard configuration.maximumFiles > 0, files.count < configuration.maximumFiles else {
+            diagnose(
+                displayName, SourceRange(startByte: 0, endByte: 0),
+                "schema file limit exceeded")
+            return
+        }
+        guard configuration.maximumSourceBytes >= 0 else {
+            diagnose(
+                displayName, SourceRange(startByte: 0, endByte: 0),
+                "schema source byte limit exceeded")
+            return
+        }
+        if let attributes = try? fileManager.attributesOfItem(atPath: url.path),
+            let size = attributes[.size] as? NSNumber,
+            size.uint64Value > UInt64(configuration.maximumSourceBytes)
+        {
+            diagnose(
+                displayName, SourceRange(startByte: 0, endByte: 0),
+                "schema source byte limit exceeded")
+            return
+        }
         let bytes: [UInt8]
         do { bytes = Array(try Data(contentsOf: url)) } catch {
             diagnose(
                 displayName, SourceRange(startByte: 0, endByte: 0), "cannot read schema: \(error)")
+            return
+        }
+        guard bytes.count <= configuration.maximumSourceBytes else {
+            diagnose(
+                displayName, SourceRange(startByte: 0, endByte: 0),
+                "schema source byte limit exceeded")
             return
         }
         let parsed = CapnProtoParser().parse(SourceFile(name: displayName, bytes: bytes))

@@ -269,6 +269,8 @@ public actor TwoPartyRPCConnection {
     private let transport: any RPCMessageTransport
     private let bootstrapTarget: CapabilityClient?
     private let maximumMessageWords: Int
+    private let maximumTableEntries: Int
+    private let errorDisclosurePolicy: RPCErrorDisclosurePolicy
     private var receiveTask: Task<Void, Never>?
     private var decoder = StreamMessageDecoder(
         options: FramingOptions(maximumSegments: 64, maximumTotalWords: 1 << 20))
@@ -305,12 +307,16 @@ public actor TwoPartyRPCConnection {
 
     public init(
         side: Side, transport: any RPCMessageTransport,
-        bootstrap: CapabilityClient? = nil, maximumMessageWords: Int = 1 << 20
+        bootstrap: CapabilityClient? = nil, maximumMessageWords: Int = 1 << 20,
+        maximumTableEntries: Int = 65_536,
+        errorDisclosurePolicy: RPCErrorDisclosurePolicy = .redacted
     ) {
         self.side = side
         self.transport = transport
         bootstrapTarget = bootstrap
         self.maximumMessageWords = maximumMessageWords
+        self.maximumTableEntries = max(0, maximumTableEntries)
+        self.errorDisclosurePolicy = errorDisclosurePolicy
         decoder = StreamMessageDecoder(
             options: FramingOptions(
                 maximumSegments: 64, maximumTotalWords: maximumMessageWords))
@@ -665,7 +671,12 @@ public actor TwoPartyRPCConnection {
                             options: ReaderOptions(
                                 traversalLimitInWords: maximumMessageWords, nestingLimit: 64)
                         ).rootStruct())
-                    try RPCWireValidator.validate(message, state: &validation)
+                    try RPCWireValidator.validate(
+                        message, state: &validation,
+                        limits: RPCValidationLimits(
+                            maximumQuestions: maximumTableEntries,
+                            maximumCapabilities: maximumTableEntries,
+                            maximumEmbargoes: maximumTableEntries))
                     try await handle(message, bytes: try MessageFraming.encode(frame.segments))
                 }
             }
@@ -845,6 +856,9 @@ public actor TwoPartyRPCConnection {
 
     private func allocateQuestion() throws -> UInt32 {
         guard !closed else { throw RPCConnectionError.disconnected }
+        guard pending.count < maximumTableEntries else {
+            throw RPCProtocolError.tableLimitExceeded
+        }
         guard nextQuestionID != UInt32.max else { throw RPCConnectionError.idExhausted }
         defer { nextQuestionID += 1 }
         return nextQuestionID
@@ -859,6 +873,9 @@ public actor TwoPartyRPCConnection {
         if let id = exportIDsByTarget[identity] {
             exportReferences[id, default: 0] += 1
             return (id, false)
+        }
+        guard exports.count < maximumTableEntries else {
+            throw RPCProtocolError.tableLimitExceeded
         }
         guard nextExportID != UInt32.max else { throw RPCConnectionError.idExhausted }
         let id = nextExportID
@@ -1040,6 +1057,9 @@ public actor TwoPartyRPCConnection {
         switch try descriptor.which {
         case .none: return .null
         case .senderHosted(let id):
+            if importReferences[id] == nil, importReferences.count >= maximumTableEntries {
+                throw RPCProtocolError.tableLimitExceeded
+            }
             importReferences[id, default: 0] += 1
             validation.imports.insert(id)
             return CapabilityClient(
@@ -1048,6 +1068,9 @@ public actor TwoPartyRPCConnection {
             if let client = promiseClients[id] {
                 importReferences[id, default: 0] += 1
                 return client
+            }
+            guard importReferences.count < maximumTableEntries else {
+                throw RPCProtocolError.tableLimitExceeded
             }
             let promise = CapabilityClient.makePromise()
             promiseResolvers[id] = promise.resolver
@@ -1121,7 +1144,7 @@ public actor TwoPartyRPCConnection {
             try result.setAnswerId(answerID)
             try result.setReleaseParamCaps(releaseParamCaps)
             let exception = try result.initException()
-            let remote = Self.wireException(error)
+            let remote = Self.wireException(error, disclosure: errorDisclosurePolicy)
             try exception.setReason(remote.reason)
             try exception.setType(Exception.Type_(rawValue: UInt16(remote.kind.rawValue)))
         }
@@ -1342,13 +1365,18 @@ public actor TwoPartyRPCConnection {
         await close()
     }
 
-    private static func wireException(_ error: any Error) -> RemoteException {
+    private static func wireException(
+        _ error: any Error, disclosure: RPCErrorDisclosurePolicy
+    ) -> RemoteException {
         if let remote = error as? RemoteException { return remote }
         if case CapabilityError.broken(let remote) = error { return remote }
         if error is CancellationError || error as? CapabilityError == .cancelled {
             return RemoteException(kind: .failed, reason: "cancelled")
         }
-        return RemoteException(kind: .failed, reason: String(describing: error))
+        return RemoteException(
+            kind: .failed,
+            reason: disclosure == .localDescription
+                ? String(describing: error) : "remote call failed")
     }
 
     private func remoteException(_ value: Exception.Reader) throws -> RemoteException {
