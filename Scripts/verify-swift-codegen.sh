@@ -12,6 +12,10 @@ fixtures="$root/Tests/CapnProtoCompilerTests/Fixtures"
 stock="$root/Tests/Conformance/capnp_test"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
+swiftc=(swiftc)
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  swiftc+=(-sdk "$(xcrun --sdk macosx --show-sdk-path)")
+fi
 
 cd "$root"
 swift build --product capnpc-swift
@@ -110,7 +114,7 @@ mkdir -p "$upstream_first" "$upstream_second"
 "$capnp" compile --no-standard-import -I"$upstream_import_root" \
   -o"$tool:$upstream_second" --src-prefix="$upstream" "$upstream/test.capnp"
 diff -ru "$upstream_first" "$upstream_second"
-swiftc -typecheck -swift-version 6 -I "$root/.build/debug/Modules" \
+"${swiftc[@]}" -typecheck -swift-version 6 -I "$root/.build/debug/Modules" \
   "$upstream_first/test.capnp.swift"
 native_test="$work/native test"
 mkdir -p "$native_test"
@@ -118,7 +122,7 @@ mkdir -p "$native_test"
   --src-prefix="$upstream" "$upstream/test.capnp" > "$work/ir-test-cpp.bin"
 "$native" compile -I"$upstream_import_root" --src-prefix "$upstream" \
   -o "$native_test" --request-output "$work/ir-test-native.bin" "$upstream/test.capnp"
-swiftc -typecheck -swift-version 6 -I "$root/.build/debug/Modules" \
+"${swiftc[@]}" -typecheck -swift-version 6 -I "$root/.build/debug/Modules" \
   "$native_test/test.capnp.swift"
 "$native" normalize-request "$work/ir-test-cpp.bin" > "$work/ir-test-cpp.txt"
 "$native" normalize-request "$work/ir-test-native.bin" > "$work/ir-test-native.txt"
@@ -161,7 +165,7 @@ diff -u "$interfaces_first/rpc-twoparty.capnp.swift" \
 "$native" normalize-request "$work/ir-rpc-cpp.bin" > "$work/ir-rpc-cpp.txt"
 "$native" normalize-request "$work/ir-rpc-native.bin" > "$work/ir-rpc-native.txt"
 diff -u "$work/ir-rpc-cpp.txt" "$work/ir-rpc-native.txt"
-swiftc -typecheck -swift-version 6 -I "$root/.build/debug/Modules" \
+"${swiftc[@]}" -typecheck -swift-version 6 -I "$root/.build/debug/Modules" \
   "$interfaces_first/rpc.capnp.swift" "$interfaces_first/rpc-twoparty.capnp.swift"
 
 echo "local, imports, evolution, test, RPC, and two-party IR/codegen verification passed"
