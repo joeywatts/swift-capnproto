@@ -18,6 +18,10 @@ let package = Package(
         .executable(name: "capnp-test-swift", targets: ["capnp-test-swift"]),
         .executable(name: "capnp-rpc-interop-swift", targets: ["capnp-rpc-interop-swift"]),
         .executable(name: "capnp-rpc-soak", targets: ["capnp-rpc-soak"]),
+        .executable(name: "capnp-example-address-book", targets: ["AddressBookExample"]),
+        .executable(name: "capnp-example-evolution", targets: ["SchemaEvolutionExample"]),
+        .executable(name: "capnp-example-calculator", targets: ["CalculatorExample"]),
+        .executable(name: "capnp-example-pipeline", targets: ["PipelinedRPCExample"]),
         .plugin(name: "CapnProtoPlugin", targets: ["CapnProtoPlugin"]),
     ],
     dependencies: [
@@ -77,8 +81,21 @@ let package = Package(
         .executableTarget(
             name: "capnp-benchmark",
             dependencies: ["CapnProto"],
-            path: "Benchmarks"
+            path: "Benchmarks",
+            exclude: ["BASELINES.tsv", "README.md", "comparison.jsonl"]
         ),
+        .executableTarget(
+            name: "AddressBookExample", dependencies: ["CapnProto"],
+            path: "Examples/AddressBook", exclude: ["addressbook.capnp"]),
+        .executableTarget(
+            name: "SchemaEvolutionExample", dependencies: ["CapnProto"],
+            path: "Examples/SchemaEvolution"),
+        .executableTarget(
+            name: "CalculatorExample", dependencies: ["CapnProto", "CapnProtoRPC"],
+            path: "Examples/Calculator"),
+        .executableTarget(
+            name: "PipelinedRPCExample", dependencies: ["CapnProto", "CapnProtoRPC"],
+            path: "Examples/PipelinedRPC"),
         .plugin(
             name: "CapnProtoPlugin", capability: .buildTool(),
             dependencies: ["capnp-swift"]),

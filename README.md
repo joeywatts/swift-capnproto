@@ -1,6 +1,6 @@
 # swift-capnproto
 
-`swift-capnproto` is a planned pure Swift implementation of
+`swift-capnproto` is a pure Swift implementation of
 [Cap'n Proto](https://capnproto.org/), including serialization, schema-driven
 code generation, reflection, and capability-based RPC.
 
@@ -71,6 +71,12 @@ Scripts/verify-rpc-interop.sh
 RPC_SOAK_SECONDS=60 Scripts/run-rpc-soak.sh
 Scripts/run-benchmarks.sh
 ```
+
+The stable 1.0 documentation includes the [serialization guide](Sources/CapnProto/CapnProto.docc/SerializationTutorial.md),
+[RPC tutorial](Documentation/RPCTutorial.md), [generated API guide](Documentation/GeneratedAPI.md),
+[migration policy](Documentation/Migration.md), and [security limits](Documentation/Security.md).
+Runnable address-book, evolution, calculator, and pipelined-RPC examples live
+under `Examples/`; `Scripts/verify-examples.sh` compiles and exercises all four.
 
 ## Compatibility testing
 
