@@ -71,7 +71,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "capnp-fuzz-schema",
-            dependencies: ["CapnProtoTestSupport"],
+            dependencies: ["CapnProtoTestSupport", "CapnProtoCompiler"],
             path: "Fuzz/Schema"
         ),
         .executableTarget(
