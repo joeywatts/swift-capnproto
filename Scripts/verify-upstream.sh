@@ -35,4 +35,6 @@ while IFS=$'\t' read -r feature sources; do
   done
 done < Tests/Upstream/FEATURES.tsv
 
+Scripts/verify-conformance-ledger.sh
+
 echo "upstream provenance and feature traceability verified"

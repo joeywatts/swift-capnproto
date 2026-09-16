@@ -1,0 +1,22 @@
+# upstream source	classification	evidence or rationale
+c++/src/capnp/canonicalize-test.c++	ported	Tests/CapnProtoTests/CanonicalizationTests.swift plus pinned C++ differential fixtures
+c++/src/capnp/capability-test.c++	ported	Tests/CapnProtoRPCTests/CapabilityTests.swift
+c++/src/capnp/compiler/evolution-test.c++	differential	Tests/CapnProtoTests/EvolutionTests.swift and evolution fixtures
+c++/src/capnp/compiler/lexer-test.c++	ported	Tests/CapnProtoCompilerTests/LexerTests.swift
+c++/src/capnp/compiler/type-id-test.c++	differential	Tests/CapnProtoCompilerTests/TypeIDTests.swift
+c++/src/capnp/dynamic-test.c++	ported	Tests/CapnProtoSchemaTests/DynamicValueCoreTests.swift and ReflectionDynamicTests.swift
+c++/src/capnp/encoding-test.c++	differential	Tests/CapnProtoTests plus Scripts/verify-fixtures.sh
+c++/src/capnp/fuzz-test.c++	ported	Tests/CapnProtoTests/ReaderLimitTests.swift and Scripts/verify-fuzz-targets.sh
+c++/src/capnp/layout-test.c++	ported	Tests/CapnProtoTests/WireReaderTests.swift and FarPointerTests.swift
+c++/src/capnp/message-test.c++	ported	Tests/CapnProtoTests/ReaderLimitTests.swift and BuilderArenaTests.swift
+c++/src/capnp/rpc-test.c++	ported	Tests/CapnProtoRPCTests/RPCConformanceTests.swift and TwoPartyConnectionTests.swift
+c++/src/capnp/rpc-twoparty-test.c++	differential	Scripts/verify-rpc-interop.sh; FD attachment cases are not applicable because no public ancillary-FD API is shipped
+c++/src/capnp/rpc-twoparty.capnp	differential	Sources/CapnProtoRPC/rpc-twoparty.capnp.swift and live two-party matrix
+c++/src/capnp/rpc.capnp	differential	Sources/CapnProtoRPC/rpc.capnp.swift and RPC wire validation tests
+c++/src/capnp/schema-loader-test.c++	ported	Tests/CapnProtoSchemaTests/SchemaLoaderTests.swift
+c++/src/capnp/schema-parser-test.c++	ported	Tests/CapnProtoCompilerTests/ParserTests.swift
+c++/src/capnp/schema-test.c++	ported	Tests/CapnProtoSchemaTests/SchemaBootstrapTests.swift and ReflectionDynamicTests.swift
+c++/src/capnp/schema.capnp	differential	Scripts/verify-schema-bootstrap.sh
+c++/src/capnp/serialize-packed-test.c++	differential	Tests/CapnProtoTests/PackedEncodingTests.swift and pinned C++ cross-decode
+c++/src/capnp/serialize-test.c++	ported	Tests/CapnProtoTests/StreamFramingTests.swift
+c++/src/capnp/test.capnp	differential	Scripts/verify-capnp-test.sh and generated conformance bindings
