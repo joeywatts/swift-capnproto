@@ -21,7 +21,7 @@ public enum ListElementSize: UInt8, CaseIterable, Sendable {
     }
 }
 
-struct ResolvedPointer {
+struct ResolvedPointer: Sendable {
     let state: ReaderState
     let segment: Int
     let pointerIndex: Int

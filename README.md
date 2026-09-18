@@ -23,6 +23,29 @@ verification criteria are described in [ROADMAP.md](ROADMAP.md).
 - `CapnProtoCompiler`, `capnpc-swift`, and `capnp-swift`: generated Swift
   bindings and a self-contained schema compiler.
 
+## SwiftPM consumption
+
+Add the package and link only the runtime product your app needs:
+
+```swift
+dependencies: [
+    .package(url: "https://github.com/joeywatts/swift-capnproto.git", from: "1.0.1")
+],
+targets: [
+    .target(
+        name: "MyAppCore",
+        dependencies: [
+            .product(name: "CapnProto", package: "swift-capnproto")
+        ]
+    )
+]
+```
+
+Add `CapnProtoSchema`, `CapnProtoRPC`, or `CapnProtoNIO` in the same way when
+the target uses those layers. Runtime products support macOS, iOS/iPadOS,
+tvOS, watchOS, visionOS, and Linux; schema compiler executables and the optional
+build plugin run on the development host.
+
 No shipped target will link the Cap'n Proto C++ implementation. The reference
 `capnp` tools in the development shell are used only to generate fixtures and
 verify wire and RPC interoperability.
@@ -63,6 +86,7 @@ The normal validation entry points are:
 
 ```sh
 swift test
+Scripts/verify-apple-platforms.sh
 Scripts/check-package-boundaries.sh
 Scripts/verify-swift-codegen.sh
 Scripts/verify-swiftpm-plugin.sh

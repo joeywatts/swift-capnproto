@@ -13,7 +13,7 @@ public enum Base {
     public static let schemaID: UInt64 = 16445351315435886556
     public static let superclassIDs: [UInt64] = []
 
-    public struct Client {
+    public struct Client: Sendable {
         public let raw: CapabilityClient
         public init(_ raw: CapabilityClient) { self.raw = raw }
         public init(_ pointer: AnyPointerReader) { raw = CapabilityClient(pointer: pointer) }
@@ -83,7 +83,7 @@ public enum Base {
             }
         }
 
-        public struct Reader {
+        public struct Reader: Sendable {
             public let raw: StructReader
             public init(_ raw: StructReader) { self.raw = raw }
             public var value: UInt32 {
@@ -104,9 +104,17 @@ public enum Base {
         public static func readRoot(from bytes: [UInt8], options: ReaderOptions = ReaderOptions())
             throws -> Reader
         {
-            let frame = try MessageFraming.decodePrefix(bytes)
-            guard frame.byteCount == bytes.count else { throw CapnProtoError.invalidFrame }
-            return Reader(try frame.reader(options: options).rootStruct())
+            Reader(try MessageReader(framedBytes: bytes, readerOptions: options).rootStruct())
+        }
+
+        public static func readRoot(
+            from bytes: [UInt8], framingOptions: FramingOptions,
+            readerOptions: ReaderOptions = ReaderOptions()
+        ) throws -> Reader {
+            Reader(
+                try MessageReader(
+                    framedBytes: bytes, framingOptions: framingOptions, readerOptions: readerOptions
+                ).rootStruct())
         }
 
         public static func initRoot(in message: MessageBuilder) throws -> Builder {
@@ -125,7 +133,7 @@ public enum Base {
             }
         }
 
-        public struct Reader {
+        public struct Reader: Sendable {
             public let raw: StructReader
             public init(_ raw: StructReader) { self.raw = raw }
             public var text: String {
@@ -147,9 +155,17 @@ public enum Base {
         public static func readRoot(from bytes: [UInt8], options: ReaderOptions = ReaderOptions())
             throws -> Reader
         {
-            let frame = try MessageFraming.decodePrefix(bytes)
-            guard frame.byteCount == bytes.count else { throw CapnProtoError.invalidFrame }
-            return Reader(try frame.reader(options: options).rootStruct())
+            Reader(try MessageReader(framedBytes: bytes, readerOptions: options).rootStruct())
+        }
+
+        public static func readRoot(
+            from bytes: [UInt8], framingOptions: FramingOptions,
+            readerOptions: ReaderOptions = ReaderOptions()
+        ) throws -> Reader {
+            Reader(
+                try MessageReader(
+                    framedBytes: bytes, framingOptions: framingOptions, readerOptions: readerOptions
+                ).rootStruct())
         }
 
         public static func initRoot(in message: MessageBuilder) throws -> Builder {
@@ -163,7 +179,7 @@ public enum Child {
     public static let schemaID: UInt64 = 16383580762931240131
     public static let superclassIDs: [UInt64] = [16445351315435886556]
 
-    public struct Client {
+    public struct Client: Sendable {
         public let raw: CapabilityClient
         public init(_ raw: CapabilityClient) { self.raw = raw }
         public init(_ pointer: AnyPointerReader) { raw = CapabilityClient(pointer: pointer) }
@@ -250,7 +266,7 @@ public enum Child {
             }
         }
 
-        public struct Reader {
+        public struct Reader: Sendable {
             public let raw: StructReader
             public init(_ raw: StructReader) { self.raw = raw }
             public var request: Advanced.Reader {
@@ -281,9 +297,17 @@ public enum Child {
         public static func readRoot(from bytes: [UInt8], options: ReaderOptions = ReaderOptions())
             throws -> Reader
         {
-            let frame = try MessageFraming.decodePrefix(bytes)
-            guard frame.byteCount == bytes.count else { throw CapnProtoError.invalidFrame }
-            return Reader(try frame.reader(options: options).rootStruct())
+            Reader(try MessageReader(framedBytes: bytes, readerOptions: options).rootStruct())
+        }
+
+        public static func readRoot(
+            from bytes: [UInt8], framingOptions: FramingOptions,
+            readerOptions: ReaderOptions = ReaderOptions()
+        ) throws -> Reader {
+            Reader(
+                try MessageReader(
+                    framedBytes: bytes, framingOptions: framingOptions, readerOptions: readerOptions
+                ).rootStruct())
         }
 
         public static func initRoot(in message: MessageBuilder) throws -> Builder {
@@ -302,7 +326,7 @@ public enum Child {
             }
         }
 
-        public struct Reader {
+        public struct Reader: Sendable {
             public let raw: StructReader
             public init(_ raw: StructReader) { self.raw = raw }
             public var response: Advanced.Reader {
@@ -333,9 +357,17 @@ public enum Child {
         public static func readRoot(from bytes: [UInt8], options: ReaderOptions = ReaderOptions())
             throws -> Reader
         {
-            let frame = try MessageFraming.decodePrefix(bytes)
-            guard frame.byteCount == bytes.count else { throw CapnProtoError.invalidFrame }
-            return Reader(try frame.reader(options: options).rootStruct())
+            Reader(try MessageReader(framedBytes: bytes, readerOptions: options).rootStruct())
+        }
+
+        public static func readRoot(
+            from bytes: [UInt8], framingOptions: FramingOptions,
+            readerOptions: ReaderOptions = ReaderOptions()
+        ) throws -> Reader {
+            Reader(
+                try MessageReader(
+                    framedBytes: bytes, framingOptions: framingOptions, readerOptions: readerOptions
+                ).rootStruct())
         }
 
         public static func initRoot(in message: MessageBuilder) throws -> Builder {
@@ -354,7 +386,7 @@ public enum Child {
             }
         }
 
-        public struct Reader {
+        public struct Reader: Sendable {
             public let raw: StructReader
             public init(_ raw: StructReader) { self.raw = raw }
             public var chunk: [UInt8] {
@@ -376,9 +408,17 @@ public enum Child {
         public static func readRoot(from bytes: [UInt8], options: ReaderOptions = ReaderOptions())
             throws -> Reader
         {
-            let frame = try MessageFraming.decodePrefix(bytes)
-            guard frame.byteCount == bytes.count else { throw CapnProtoError.invalidFrame }
-            return Reader(try frame.reader(options: options).rootStruct())
+            Reader(try MessageReader(framedBytes: bytes, readerOptions: options).rootStruct())
+        }
+
+        public static func readRoot(
+            from bytes: [UInt8], framingOptions: FramingOptions,
+            readerOptions: ReaderOptions = ReaderOptions()
+        ) throws -> Reader {
+            Reader(
+                try MessageReader(
+                    framedBytes: bytes, framingOptions: framingOptions, readerOptions: readerOptions
+                ).rootStruct())
         }
 
         public static func initRoot(in message: MessageBuilder) throws -> Builder {
@@ -399,7 +439,7 @@ public enum CapabilityHolder {
         }
     }
 
-    public struct Reader {
+    public struct Reader: Sendable {
         public let raw: StructReader
         public init(_ raw: StructReader) { self.raw = raw }
         public var service: Child.Client {
@@ -447,9 +487,17 @@ public enum CapabilityHolder {
     public static func readRoot(from bytes: [UInt8], options: ReaderOptions = ReaderOptions())
         throws -> Reader
     {
-        let frame = try MessageFraming.decodePrefix(bytes)
-        guard frame.byteCount == bytes.count else { throw CapnProtoError.invalidFrame }
-        return Reader(try frame.reader(options: options).rootStruct())
+        Reader(try MessageReader(framedBytes: bytes, readerOptions: options).rootStruct())
+    }
+
+    public static func readRoot(
+        from bytes: [UInt8], framingOptions: FramingOptions,
+        readerOptions: ReaderOptions = ReaderOptions()
+    ) throws -> Reader {
+        Reader(
+            try MessageReader(
+                framedBytes: bytes, framingOptions: framingOptions, readerOptions: readerOptions
+            ).rootStruct())
     }
 
     public static func initRoot(in message: MessageBuilder) throws -> Builder {

@@ -92,7 +92,7 @@ public enum SimpleTestStruct {
         }
     }
 
-    public struct Reader {
+    public struct Reader: Sendable {
         public let raw: StructReader
         public init(_ raw: StructReader) { self.raw = raw }
         public var int: Int32 {
@@ -122,9 +122,17 @@ public enum SimpleTestStruct {
     public static func readRoot(from bytes: [UInt8], options: ReaderOptions = ReaderOptions())
         throws -> Reader
     {
-        let frame = try MessageFraming.decodePrefix(bytes)
-        guard frame.byteCount == bytes.count else { throw CapnProtoError.invalidFrame }
-        return Reader(try frame.reader(options: options).rootStruct())
+        Reader(try MessageReader(framedBytes: bytes, readerOptions: options).rootStruct())
+    }
+
+    public static func readRoot(
+        from bytes: [UInt8], framingOptions: FramingOptions,
+        readerOptions: ReaderOptions = ReaderOptions()
+    ) throws -> Reader {
+        Reader(
+            try MessageReader(
+                framedBytes: bytes, framingOptions: framingOptions, readerOptions: readerOptions
+            ).rootStruct())
     }
 
     public static func initRoot(in message: MessageBuilder) throws -> Builder {
@@ -143,7 +151,7 @@ public enum ListTest {
         }
     }
 
-    public struct Reader {
+    public struct Reader: Sendable {
         public let raw: StructReader
         public init(_ raw: StructReader) { self.raw = raw }
         public var textList: [String] {
@@ -176,9 +184,17 @@ public enum ListTest {
     public static func readRoot(from bytes: [UInt8], options: ReaderOptions = ReaderOptions())
         throws -> Reader
     {
-        let frame = try MessageFraming.decodePrefix(bytes)
-        guard frame.byteCount == bytes.count else { throw CapnProtoError.invalidFrame }
-        return Reader(try frame.reader(options: options).rootStruct())
+        Reader(try MessageReader(framedBytes: bytes, readerOptions: options).rootStruct())
+    }
+
+    public static func readRoot(
+        from bytes: [UInt8], framingOptions: FramingOptions,
+        readerOptions: ReaderOptions = ReaderOptions()
+    ) throws -> Reader {
+        Reader(
+            try MessageReader(
+                framedBytes: bytes, framingOptions: framingOptions, readerOptions: readerOptions
+            ).rootStruct())
     }
 
     public static func initRoot(in message: MessageBuilder) throws -> Builder {
@@ -210,7 +226,7 @@ public enum TestAllTypes {
         }
     }
 
-    public struct Reader {
+    public struct Reader: Sendable {
         public let raw: StructReader
         public init(_ raw: StructReader) { self.raw = raw }
         public var voidField: Void {
@@ -681,9 +697,17 @@ public enum TestAllTypes {
     public static func readRoot(from bytes: [UInt8], options: ReaderOptions = ReaderOptions())
         throws -> Reader
     {
-        let frame = try MessageFraming.decodePrefix(bytes)
-        guard frame.byteCount == bytes.count else { throw CapnProtoError.invalidFrame }
-        return Reader(try frame.reader(options: options).rootStruct())
+        Reader(try MessageReader(framedBytes: bytes, readerOptions: options).rootStruct())
+    }
+
+    public static func readRoot(
+        from bytes: [UInt8], framingOptions: FramingOptions,
+        readerOptions: ReaderOptions = ReaderOptions()
+    ) throws -> Reader {
+        Reader(
+            try MessageReader(
+                framedBytes: bytes, framingOptions: framingOptions, readerOptions: readerOptions
+            ).rootStruct())
     }
 
     public static func initRoot(in message: MessageBuilder) throws -> Builder {
@@ -702,7 +726,7 @@ public enum TestDefaults {
         }
     }
 
-    public struct Reader {
+    public struct Reader: Sendable {
         public let raw: StructReader
         public init(_ raw: StructReader) { self.raw = raw }
         public var voidField: Void {
@@ -1299,9 +1323,17 @@ public enum TestDefaults {
     public static func readRoot(from bytes: [UInt8], options: ReaderOptions = ReaderOptions())
         throws -> Reader
     {
-        let frame = try MessageFraming.decodePrefix(bytes)
-        guard frame.byteCount == bytes.count else { throw CapnProtoError.invalidFrame }
-        return Reader(try frame.reader(options: options).rootStruct())
+        Reader(try MessageReader(framedBytes: bytes, readerOptions: options).rootStruct())
+    }
+
+    public static func readRoot(
+        from bytes: [UInt8], framingOptions: FramingOptions,
+        readerOptions: ReaderOptions = ReaderOptions()
+    ) throws -> Reader {
+        Reader(
+            try MessageReader(
+                framedBytes: bytes, framingOptions: framingOptions, readerOptions: readerOptions
+            ).rootStruct())
     }
 
     public static func initRoot(in message: MessageBuilder) throws -> Builder {

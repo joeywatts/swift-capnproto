@@ -5,7 +5,11 @@ import PackageDescription
 let package = Package(
     name: "swift-capnproto",
     platforms: [
-        .macOS(.v13)
+        .macOS(.v13),
+        .iOS(.v17),
+        .tvOS(.v17),
+        .watchOS(.v10),
+        .visionOS(.v1),
     ],
     products: [
         .library(name: "CapnProto", targets: ["CapnProto"]),

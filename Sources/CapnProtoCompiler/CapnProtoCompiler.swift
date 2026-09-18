@@ -160,7 +160,7 @@ public struct SwiftGenerator {
             "\(indent)    public static let superclassIDs: [UInt64] = [\(try superclasses.map { String(try $0.id) }.joined(separator: ", "))]"
         )
         lines.append("")
-        lines.append("\(indent)    public struct Client {")
+        lines.append("\(indent)    public struct Client: Sendable {")
         lines.append("\(indent)        public let raw: CapabilityClient")
         lines.append("\(indent)        public init(_ raw: CapabilityClient) { self.raw = raw }")
         lines.append(
@@ -388,7 +388,7 @@ public struct SwiftGenerator {
             let genericTypes = parameters.map { "\(swiftIdentifier($0)): CapnProtoPointerType" }
             lines.append(
                 "\(indent)    public struct Generic<\(genericTypes.joined(separator: ", "))> {")
-            lines.append("\(indent)        public struct Reader {")
+            lines.append("\(indent)        public struct Reader: Sendable {")
             lines.append("\(indent)            public let raw: \(name).Reader")
             lines.append(
                 "\(indent)            public init(_ raw: \(name).Reader) { self.raw = raw }")
@@ -431,6 +431,13 @@ public struct SwiftGenerator {
                 "\(indent)            Reader(try \(name).readRoot(from: bytes, options: options))")
             lines.append("\(indent)        }")
             lines.append(
+                "\(indent)        public static func readRoot(from bytes: [UInt8], framingOptions: FramingOptions, readerOptions: ReaderOptions = ReaderOptions()) throws -> Reader {"
+            )
+            lines.append(
+                "\(indent)            Reader(try \(name).readRoot(from: bytes, framingOptions: framingOptions, readerOptions: readerOptions))"
+            )
+            lines.append("\(indent)        }")
+            lines.append(
                 "\(indent)        public static func initRoot(in message: MessageBuilder) throws -> Builder {"
             )
             lines.append("\(indent)            Builder(try \(name).initRoot(in: message))")
@@ -445,7 +452,7 @@ public struct SwiftGenerator {
                 node, fields: unionFields, names: names, indent: indent + "    ", into: &lines)
         }
         lines.append("")
-        lines.append("\(indent)    public struct Reader {")
+        lines.append("\(indent)    public struct Reader: Sendable {")
         lines.append("\(indent)        public let raw: StructReader")
         lines.append("\(indent)        public init(_ raw: StructReader) { self.raw = raw }")
         for field in try node.fields {
@@ -540,12 +547,17 @@ public struct SwiftGenerator {
             lines.append(
                 "\(indent)    public static func readRoot(from bytes: [UInt8], options: ReaderOptions = ReaderOptions()) throws -> Reader {"
             )
-            lines.append("\(indent)        let frame = try MessageFraming.decodePrefix(bytes)")
             lines.append(
-                "\(indent)        guard frame.byteCount == bytes.count else { throw CapnProtoError.invalidFrame }"
+                "\(indent)        Reader(try MessageReader(framedBytes: bytes, readerOptions: options).rootStruct())"
+            )
+            lines.append("\(indent)    }")
+            lines.append("")
+            lines.append(
+                "\(indent)    public static func readRoot(from bytes: [UInt8], framingOptions: FramingOptions, readerOptions: ReaderOptions = ReaderOptions()) throws -> Reader {"
             )
             lines.append(
-                "\(indent)        return Reader(try frame.reader(options: options).rootStruct())")
+                "\(indent)        Reader(try MessageReader(framedBytes: bytes, framingOptions: framingOptions, readerOptions: readerOptions).rootStruct())"
+            )
             lines.append("\(indent)    }")
             lines.append("")
             lines.append(
@@ -600,7 +612,7 @@ public struct SwiftGenerator {
         _ node: Schema.Node, fields: [Schema.Field], names: [Schema.ID: String], indent: String,
         into lines: inout [String]
     ) throws {
-        lines.append("\(indent)public enum Which {")
+        lines.append("\(indent)public enum Which: Sendable {")
         for field in fields {
             let name = swiftIdentifier(try field.name)
             switch try field.kind {

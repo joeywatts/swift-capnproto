@@ -120,7 +120,7 @@ public struct StructReader: Sendable {
     }
 }
 
-public struct ListReader {
+public struct ListReader: Sendable {
     let state: ReaderState
     let segment: Int
     let startWord: Int
@@ -310,7 +310,7 @@ public struct ListReader {
     }
 }
 
-public struct AnyPointerReader {
+public struct AnyPointerReader: Sendable {
     let pointer: ResolvedPointer
     private let depth: Int
 
@@ -385,7 +385,7 @@ public enum CapnProtoData: CapnProtoPointerType {
     }
 }
 
-public struct DataReader {
+public struct DataReader: Sendable {
     private let list: ListReader
     init(list: ListReader) { self.list = list }
     public var count: Int { list.count }
@@ -397,7 +397,7 @@ public struct DataReader {
     }
 }
 
-public struct TextReader {
+public struct TextReader: Sendable {
     private let data: DataReader
     init(data: DataReader) { self.data = data }
     public var utf8Bytes: [UInt8] { Array(data.bytes.dropLast()) }

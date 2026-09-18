@@ -10,6 +10,14 @@ try root.setTextField(at: 0, to: "Ada")
 let bytes = try message.framedBytes
 ```
 
+Apple APIs commonly exchange `Foundation.Data`; use `message.framedData` (or
+`packedFramedData`) and construct a reader directly at the boundary:
+
+```swift
+let data = try message.framedData
+let reader = try MessageReader(framedData: data)
+```
+
 At an input boundary, select explicit resource limits before reading:
 
 ```swift
@@ -18,6 +26,10 @@ let frame = try MessageFraming.decodePrefix(
 let reader = try frame.reader(
     options: ReaderOptions(traversalLimitInWords: 65_536, nestingLimit: 32))
 ```
+
+When the input must contain exactly one message, `MessageReader(framedBytes:)`
+or `MessageReader(framedData:)` rejects trailing frames and accepts both framing
+and reader limits as arguments.
 
 Use `PackedEncoding.pack` only around complete word-aligned content and bound
 unpacking with `maximumOutputBytes`.

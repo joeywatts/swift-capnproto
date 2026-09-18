@@ -122,7 +122,7 @@ public struct MessageReader: Sendable {
     }
 }
 
-public struct SegmentReader {
+public struct SegmentReader: Sendable {
     private let state: ReaderState
     public let id: Int
 

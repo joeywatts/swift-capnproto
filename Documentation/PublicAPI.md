@@ -9,6 +9,11 @@ connection abstractions; generated wire structs remain an implementation detail
 despite residing in the module. `CapnProtoNIO` exposes transports only, and
 `CapnProtoCompiler` exposes the native frontend and generator model.
 
+Immutable reader views and generated readers are `Sendable`. Foundation-facing
+applications can use `Data` adapters for framed and packed messages without
+manually converting at every I/O boundary. Exact-frame reader initializers keep
+framing limits and traversal limits explicit while rejecting trailing messages.
+
 Arena storage, pointer resolution, mutable reader state, transport mailboxes,
 RPC table entries, parser state, and native layout IR are internal. The release
 check rejects public declarations with those internal implementation names.

@@ -3,6 +3,13 @@
 `capnpc-swift` emits namespace enums containing typed `Reader` and `Builder`
 views. Struct and list storage remains owned by the underlying message, so a
 generated view is inexpensive and preserves Cap'n Proto's evolution rules.
+Reader and client views conform to `Sendable`; mutable builder views remain
+task-confined because they share mutable message storage.
+
+Every generated non-group struct provides `readRoot(from:)` and
+`initRoot(in:)`. The root reader rejects trailing frames. Its overload accepting
+`FramingOptions` and `ReaderOptions` lets applications apply separate wire-size
+and traversal limits at untrusted input boundaries.
 
 Union-bearing structs expose a throwing `which` view. Its cases carry the
 selected value, and `.unknown(UInt16)` preserves discriminants introduced by a

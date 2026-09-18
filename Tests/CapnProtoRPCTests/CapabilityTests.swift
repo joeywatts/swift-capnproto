@@ -36,6 +36,15 @@ private final class EchoTarget: CapabilityCallTarget, @unchecked Sendable {
     var calls: [UInt32] { lock.withLock { values } }
 }
 
+@Test func localIdentityTracksTheUnderlyingCapabilityTarget() {
+    let target = EchoTarget()
+    let first = CapabilityClient(target: target)
+    let second = CapabilityClient(target: target)
+    let other = CapabilityClient(target: EchoTarget())
+    #expect(first.localIdentity == second.localIdentity)
+    #expect(first.localIdentity != other.localIdentity)
+}
+
 // Adapts Capability.Basic and Capability.Inheritance from capability-test.c++ at
 // upstream commit 3a82de9b39736a2625f03c93b2b7c50642dd5b25, plus its null/broken cases.
 @Test func localNullBrokenAndCastCapabilities() async throws {

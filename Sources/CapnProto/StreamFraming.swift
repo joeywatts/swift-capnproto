@@ -8,7 +8,7 @@ public struct FramingOptions: Equatable, Sendable {
     }
 }
 
-public struct FramedMessage {
+public struct FramedMessage: Equatable, Sendable {
     public let segments: [[UInt8]]
     public let byteCount: Int
 
@@ -91,6 +91,15 @@ public enum MessageFraming {
         return FramedMessage(segments: segments, byteCount: frameBytes)
     }
 
+    /// Decodes exactly one framed message and rejects trailing bytes.
+    public static func decode(
+        _ bytes: [UInt8], options: FramingOptions = FramingOptions()
+    ) throws -> FramedMessage {
+        let message = try decodePrefix(bytes, options: options)
+        guard message.byteCount == bytes.count else { throw CapnProtoError.invalidFrame }
+        return message
+    }
+
     public static func decodeAll(
         _ bytes: [UInt8], options: FramingOptions = FramingOptions()
     ) throws -> [FramedMessage] {
@@ -119,7 +128,7 @@ public enum MessageFraming {
     }
 }
 
-public struct StreamMessageDecoder {
+public struct StreamMessageDecoder: Sendable {
     private var buffer = [UInt8]()
     private let options: FramingOptions
 
@@ -152,5 +161,16 @@ extension MessageBuilder {
 
     public var framedBytes: [UInt8] {
         get throws { try MessageFraming.encode(segments) }
+    }
+}
+
+extension MessageReader {
+    /// Creates a reader from exactly one stream-framed message.
+    public init(
+        framedBytes: [UInt8], framingOptions: FramingOptions = FramingOptions(),
+        readerOptions: ReaderOptions = ReaderOptions()
+    ) throws {
+        self = try MessageFraming.decode(framedBytes, options: framingOptions)
+            .reader(options: readerOptions)
     }
 }

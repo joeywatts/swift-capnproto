@@ -183,6 +183,13 @@ public struct CapabilityClient: @unchecked Sendable {
     let target: any CapabilityCallTarget
     public let tableIndex: UInt32?
 
+    /// Stable process-local identity for the underlying call target.
+    ///
+    /// This lets capability hosts associate a returned local capability with
+    /// host-owned state when the peer later passes that capability back. It is
+    /// deliberately meaningful only within the current process and lifetime.
+    public var localIdentity: ObjectIdentifier { ObjectIdentifier(target) }
+
     public init(target: any CapabilityCallTarget, tableIndex: UInt32? = nil) {
         self.target = target
         self.tableIndex = tableIndex

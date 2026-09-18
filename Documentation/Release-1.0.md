@@ -14,7 +14,7 @@ reflection, compiler, and Level 3 two-party RPC stack.
 The protocol baseline is Cap'n Proto 1.x commit
 `3a82de9b39736a2625f03c93b2b7c50642dd5b25`; the language-neutral test baseline
 is `kaos/capnp_test` commit `9aad1331857d2b02158cffdba4d664f71f7f81de`.
-Checksums for generated release inputs are in `Release/1.0.0-CHECKSUMS`.
+Checksums for generated release inputs are in `Release/1.0.1-CHECKSUMS`.
 The tag workflow publishes the deterministic source archive and its
 `SHA256SUMS` artifact; reproduce both with `Scripts/create-source-release.sh`.
 
